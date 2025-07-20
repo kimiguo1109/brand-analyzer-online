@@ -469,8 +469,24 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
     }
 
     // 过滤品牌名称
-    filterBrandName(brandName, accountType) {
+    filterBrandName(brandName, accountType, analysisDetails = '') {
         if (!brandName || !brandName.trim()) {
+            return '';
+        }
+
+        // 如果AI分析明确说没有品牌合作，则过滤掉品牌名称
+        const noPartnershipIndicators = [
+            'no indication of a brand partnership',
+            'no clear brand partnership',
+            'no significant brand indicators',
+            'no brand partnership signals',
+            'no sponsorship disclosure',
+            'regular creator',
+            'personal account'
+        ];
+
+        if (noPartnershipIndicators.some(indicator => 
+            analysisDetails.toLowerCase().includes(indicator))) {
             return '';
         }
 
@@ -479,18 +495,51 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
             return brandName.trim();
         }
 
+        // 已知无效品牌名称列表
+        const invalidBrandNames = [
+            'sabrina', 'fall', 'taylor', 'jeneralgrievous', 'sweet', 'hobipower', 
+            'gloria', 'leah', 'flyanaboss', 'andrea', 'josh', 'leam', 'megan',
+            'calvin896155', 'alessio', 'jerseyjanetp', 'chet', 'old', 'stop',
+            'metro', 'prices', 'iszuh', 'samhealinghabits', 'none', 'null', 'test'
+        ];
+
         // UGC创作者需要更严格的过滤
         if (accountType === 'ugc creator') {
-            const invalidIndicators = [
-                brandName.length < 3,
-                ['andrea', 'josh', 'leam', 'none', 'null', 'test'].includes(brandName.toLowerCase()),
-                /^[0-9]+$/.test(brandName),
-                !/[a-zA-Z]/.test(brandName)
+            // 分割多个品牌名称并过滤
+            const brands = brandName.split(',').map(b => b.trim()).filter(b => {
+                const lowerBrand = b.toLowerCase();
+                
+                const invalidIndicators = [
+                    b.length < 3,
+                    invalidBrandNames.includes(lowerBrand),
+                    /^[0-9]+$/.test(b),
+                    !/[a-zA-Z]/.test(b),
+                    // 检查是否是明显的人名
+                    /^[A-Z][a-z]+$/.test(b) && b.length <= 8 && invalidBrandNames.includes(lowerBrand)
+                ];
+
+                return !invalidIndicators.some(Boolean);
+            });
+
+            // 只保留已知的真实品牌
+            const knownBrands = [
+                'nike', 'adidas', 'apple', 'samsung', 'google', 'microsoft', 'chanel', 
+                'dior', 'gucci', 'prada', 'versace', 'sephora', 'ulta', 'lululemon', 
+                'nordstrom', 'zara', 'uniqlo', 'target', 'walmart', 'amazon', 'shein',
+                'old spice', 'oldspice', 'nivea', 'dove', 'costco', 'bissell', 'snickers',
+                'peacock', 'netflix', 'uber', 'tesla', 'starbucks', 'mcdonald', 'sony',
+                'microsoft', 'cerave', 'neutrogena', 'softsoap', 'listerine', 'kraft',
+                'culturelle', 'serovital', 'north face', 'mackenzie'
             ];
 
-            if (invalidIndicators.some(Boolean)) {
-                return '';
-            }
+            const validBrands = brands.filter(brand => {
+                const lowerBrand = brand.toLowerCase();
+                return knownBrands.some(known => 
+                    lowerBrand.includes(known) || known.includes(lowerBrand)
+                );
+            });
+
+            return validBrands.length > 0 ? validBrands.join(', ') : '';
         }
 
         return brandName.trim();
@@ -579,8 +628,12 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
         // 获取账户类型
         const accountType = this.getAccountType(analysisResult);
         
-        // 过滤品牌名称
-        const filteredBrandName = this.filterBrandName(analysisResult.brand_name, accountType);
+        // 过滤品牌名称（传入分析详情）
+        const filteredBrandName = this.filterBrandName(
+            analysisResult.brand_name, 
+            accountType, 
+            analysisResult.analysis_details
+        );
         
         // 返回完整分析结果
         const result = {

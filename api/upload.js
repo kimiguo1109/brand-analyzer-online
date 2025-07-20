@@ -189,12 +189,33 @@ async function processFileAsync(taskId, fileContent, fileType) {
 
     console.log(`🎯 [${taskId}] 所有批次处理完成，总结果: ${results.length}`);
 
-    // 统计结果
-    const brandRelated = results.filter(r => 
-      (r.brand && r.brand.trim()) || 
-      r.account_type === 'official account' || 
-      r.account_type === 'matrix account'
-    );
+    // 统计结果 - 更严格的品牌相关判断
+    const brandRelated = results.filter(r => {
+      // 官方账号和矩阵账号肯定是品牌相关
+      if (r.account_type === 'official account' || r.account_type === 'matrix account') {
+        return true;
+      }
+      
+      // UGC创作者：需要有有效的品牌名称且分析详情不能明确说无品牌合作
+      if (r.account_type === 'ugc creator') {
+        // 检查是否有有效品牌名称
+        const hasValidBrand = r.brand && r.brand.trim() && r.brand !== '';
+        
+        // 检查分析详情是否明确说没有品牌合作
+        const analysisDetails = (r.analysis_details || '').toLowerCase();
+        const noPartnership = [
+          'no indication of a brand partnership',
+          'no clear brand partnership',
+          'no significant brand indicators',
+          'regular creator'
+        ].some(indicator => analysisDetails.includes(indicator));
+        
+        return hasValidBrand && !noPartnership;
+      }
+      
+      return false;
+    });
+    
     const nonBrand = results.filter(r => !brandRelated.includes(r));
 
     // 详细统计
