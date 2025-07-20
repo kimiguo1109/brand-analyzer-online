@@ -206,11 +206,15 @@ const BrandAnalyzerDashboard = () => {
             
             // 数据文件（用于下载）
             brand_file: 'brand_related_creators.csv',
-            non_brand_file: 'non_brand_creators.csv'
+            non_brand_file: 'non_brand_creators.csv',
+            
+            // 品牌分布数据
+            brand_distribution: analysisResults.brand_distribution || {},
+            unique_brands_count: analysisResults.unique_brands_count || 0
           };
           
           setResults(mappedResults);
-          setDetailedResults(analysisResults.all_data || []); // 存储详细结果用于下载
+          setDetailedResults(analysisResults); // 存储完整的分析结果对象，包含分类数据
           setLogs(data.analysis_logs || ['文件上传成功', '分析完成']);
           
         } else if (data.status === 'error') {
@@ -444,10 +448,10 @@ const BrandAnalyzerDashboard = () => {
         // 非品牌：没有品牌关联的创作者
         filteredResults = detailedResults.non_brand_data || [];
         filename = 'non_brand_creators.csv';
-      } else if (fileType === 'all') {
+      } else if (fileType === 'all' || fileType === 'merged') {
         // 所有数据
         filteredResults = detailedResults.all_data || [];
-        filename = 'all_creators.csv';
+        filename = 'all_creators_merged.csv';
       } else {
         setError('无效的文件类型');
         return;
@@ -942,15 +946,13 @@ const BrandAnalyzerDashboard = () => {
                 Download Non-Brand Data
                 </button>
                 
-                {results.merged_file && (
-                  <button
-                    onClick={() => handleDownload('merged')}
-                    className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Download Merged Results
-                  </button>
-                )}
+                <button
+                  onClick={() => handleDownload('merged')}
+                  className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download All Results
+                </button>
             </div>
           </div>
         )}
