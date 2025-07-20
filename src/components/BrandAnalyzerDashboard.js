@@ -10,6 +10,7 @@ const BrandAnalyzerDashboard = () => {
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [useMockData, setUseMockData] = useState(false);
+  const [detailedResults, setDetailedResults] = useState(null); // 存储详细分析结果用于下载
   const logsContainerRef = useRef(null);
 
   // 模拟数据 - 基于实际数据结构
@@ -101,8 +102,44 @@ const BrandAnalyzerDashboard = () => {
         clearInterval(interval);
         setStatus('completed');
         setResults(mockResults);
+        // 为演示模式生成假的详细结果
+        setDetailedResults(generateMockDetailedResults());
       }
     }, 800);
+  };
+
+  // 生成Mock详细结果数据
+  const generateMockDetailedResults = () => {
+    const creators = [
+      { id: 'oldspice.ph', name: 'Old Spice PH', followers: 193278, isBrand: true },
+      { id: 'costcoguide', name: 'Costco Guide', followers: 893151, isBrand: true },
+      { id: 'gracewellsphoto', name: 'Grace Wells', followers: 2800321, isBrand: true },
+      { id: 'testuser1', name: 'Regular Creator', followers: 50000, isBrand: false },
+      { id: 'testuser2', name: 'Beauty Blogger', followers: 120000, isBrand: false }
+    ];
+
+    return creators.map(creator => ({
+      video_id: '7' + Math.floor(Math.random() * 900000000000000000 + 100000000000000000).toString(),
+      author_unique_id: creator.id,
+      author_link: `https://www.tiktok.com/@${creator.id}`,
+      signature: creator.name,
+      account_type: creator.isBrand ? (creator.id.includes('oldspice') ? 'official account' : 'ugc creator') : 'ugc creator',
+      brand: creator.isBrand ? 'Old Spice' : '',
+      email: '',
+      recent_20_posts_views_avg: Math.floor(Math.random() * 1000000) + 50000,
+      recent_20_posts_like_avg: Math.floor(Math.random() * 10000) + 1000,
+      recent_20_posts_share_avg: Math.floor(Math.random() * 1000) + 100,
+      posting_frequency: Math.random() * 2,
+      stability_score: Math.random(),
+      brand_confidence: creator.isBrand ? (Math.random() * 0.3 + 0.7) : (Math.random() * 0.3),
+      analysis_details: creator.isBrand ? `Brand partnership detected for ${creator.name}` : 'No brand association detected',
+      author_followers_count: creator.followers,
+      author_followings_count: Math.floor(Math.random() * 1000) + 100,
+      videoCount: Math.floor(Math.random() * 500) + 50,
+      author_avatar: 'https://example.com/avatar.jpg',
+      create_times: new Date().toISOString().split('T')[0],
+      is_brand: creator.isBrand
+    }));
   };
 
   // 真实文件上传处理
@@ -154,6 +191,7 @@ const BrandAnalyzerDashboard = () => {
             non_brand_file: backendResults.non_brand_file
           };
           setResults(mappedResults);
+          setDetailedResults(backendResults.detailed_results || []); // 存储详细结果
           setLogs(['文件上传成功', '分析完成', `处理了 ${mappedResults.total_processed} 个创作者`]);
         } else if (data.status === 'error') {
           setStatus('error');
@@ -249,6 +287,7 @@ const BrandAnalyzerDashboard = () => {
             non_brand_file: backendResults.non_brand_file
           };
           setResults(mappedResults);
+          setDetailedResults(backendResults.detailed_results || []); // 存储详细结果
           setLogs(['示例CSV文件上传成功', '分析完成', `处理了 ${mappedResults.total_processed} 个创作者`]);
           setFile({ name: 'test_tiktok_sample.csv' }); // 设置文件显示
         } else if (data.status === 'error') {
@@ -319,6 +358,7 @@ const BrandAnalyzerDashboard = () => {
               non_brand_file: backendResults.non_brand_file
             };
             setResults(mappedResults);
+            setDetailedResults(backendResults.detailed_results || []); // 存储详细结果
           }
         } else if (data.status === 'error') {
           setError(data.progress || data.error || '分析过程中发生错误');
@@ -375,56 +415,116 @@ const BrandAnalyzerDashboard = () => {
     }
   }, [logs, status]);
 
-  // 下载文件
-  const handleDownload = async (fileType) => {
-    if (!taskId) return;
+  // 前端生成CSV下载（解决404问题）
+  const generateCSVFromResults = (filteredResults, filename) => {
+    if (!filteredResults || filteredResults.length === 0) {
+      alert('没有数据可下载');
+      return;
+    }
 
-    if (useMockData) {
-      // 演示模式下模拟下载
-      const filename = fileType === 'brand_related' ? 'brand_related_creators.csv' : 'non_brand_creators.csv';
-      const csvContent = `author_unique_id,signature,is_brand,brand_name,author_followers_count
-test_creator_1,AI Tools Reviewer,false,,100000
-test_creator_2,Official Brand Account,true,Test Brand,50000
-test_creator_3,Tech Enthusiast,false,,25000`;
-      
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+    // CSV字段定义（匹配期望的报告格式）
+    const fieldnames = [
+      'video_id',
+      'author_unique_id', 
+      'author_link',
+      'signature',
+      'account_type',
+      'brand',
+      'email',
+      'recent_20_posts_views_avg',
+      'recent_20_posts_like_avg',
+      'recent_20_posts_share_avg',
+      'posting_frequency',
+      'stability_score',
+      'brand_confidence',
+      'analysis_details',
+      'author_followers_count',
+      'author_followings_count',
+      'videoCount',
+      'author_avatar',
+      'create_times'
+    ];
+
+    // 生成CSV头部
+    let csvContent = fieldnames.map(field => `"${field}"`).join(',') + '\n';
+
+    // 生成数据行
+    filteredResults.forEach(result => {
+      const row = [
+        escapeCSVField(result.video_id || ''),
+        escapeCSVField(result.author_unique_id || ''),
+        escapeCSVField(result.author_link || ''),
+        escapeCSVField(result.signature || ''),
+        escapeCSVField(result.account_type || 'ugc creator'),
+        escapeCSVField(result.brand || ''),
+        escapeCSVField(result.email || ''),
+        result.recent_20_posts_views_avg || 0,
+        result.recent_20_posts_like_avg || 0,
+        result.recent_20_posts_share_avg || 0,
+        result.posting_frequency || 0,
+        result.stability_score || 0,
+        result.brand_confidence || 0,
+        escapeCSVField(result.analysis_details || ''),
+        result.author_followers_count || 0,
+        result.author_followings_count || 0,
+        result.videoCount || 0,
+        escapeCSVField(result.author_avatar || ''),
+        escapeCSVField(result.create_times || '')
+      ];
+
+      csvContent += row.join(',') + '\n';
+    });
+
+    // 触发下载
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // CSV字段转义函数
+  const escapeCSVField = (field) => {
+    if (field === null || field === undefined) return '';
+    const str = String(field);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return `"${str}"`;
+  };
+
+  // 下载文件（使用前端生成）
+  const handleDownload = async (fileType) => {
+    if (!detailedResults || detailedResults.length === 0) {
+      setError('没有可下载的分析结果，请先完成分析');
       return;
     }
 
     try {
-      const response = await fetch(`/api/download?task_id=${taskId}&file_type=${fileType}`);
-      
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = `${fileType}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+      let filteredResults = [];
+      let filename = '';
+
+      if (fileType === 'brand_related' || fileType === 'brand') {
+        // 品牌相关：包含所有品牌相关的创作者
+        filteredResults = detailedResults.filter(r => r.is_brand);
+        filename = 'brand_related_creators.csv';
+      } else if (fileType === 'non_brand') {
+        // 非品牌：没有品牌关联的创作者
+        filteredResults = detailedResults.filter(r => !r.is_brand);
+        filename = 'non_brand_creators.csv';
       } else {
-        const errorData = await response.json();
-        if (response.status === 404 && errorData.code === 'TASK_NOT_FOUND') {
-          setError('分析任务已过期，无法下载文件。请重新运行分析。');
-        } else {
-          setError(errorData.message || 'Download failed');
-        }
+        setError('无效的文件类型');
+        return;
       }
+
+      generateCSVFromResults(filteredResults, filename);
     } catch (error) {
       console.error('Download error:', error);
-      setError('下载文件时发生网络错误，请稍后重试');
+      setError('下载文件时发生错误，请稍后重试');
     }
   };
 
@@ -434,6 +534,7 @@ test_creator_3,Tech Enthusiast,false,,25000`;
     setStatus(null);
     setLogs([]);
     setResults(null);
+    setDetailedResults(null);
     setError(null);
   };
 
@@ -475,10 +576,10 @@ test_creator_3,Tech Enthusiast,false,,25000`;
                   <h3 className="text-lg font-medium text-gray-900">Real Analysis</h3>
                 </div>
                 <p className="text-sm text-gray-600">
-                  Upload your JSON file for actual AI-powered brand analysis. 
-                  This will use Gemini AI to analyze creator profiles and classify them.
+                  Upload your CSV/JSON file for intelligent brand analysis. 
+                  This will analyze creator profiles and classify them by brand association.
                   <span className="block mt-1 font-medium text-green-600">
-                    ✓ Real results ✓ AI analysis ✓ Downloadable reports
+                    ✓ Smart analysis ✓ Brand detection ✓ Downloadable reports
                   </span>
                 </p>
               </div>
@@ -509,10 +610,9 @@ test_creator_3,Tech Enthusiast,false,,25000`;
             </div>
 
             {!useMockData && (
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                <p className="text-sm text-yellow-700">
-                  <strong>Note:</strong> Real analysis mode requires Python environment and may take several minutes to complete. 
-                  The system will use Gemini AI to analyze each creator profile.
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p className="text-sm text-blue-700">
+                  <strong>Note:</strong> Real analysis mode uses intelligent algorithms to analyze creator profiles and detect brand associations.
                 </p>
               </div>
             )}
@@ -557,33 +657,53 @@ test_creator_3,Tech Enthusiast,false,,25000`;
             />
 
             {error && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <div className="mt-2 p-4 bg-red-50 border border-red-200 rounded-md">
                 <div className="flex">
-                  <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
-                  <span className="text-red-700">{error}</span>
+                  <AlertCircle className="h-5 w-5 text-red-400 mr-3 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm text-red-800 font-medium">分析出现问题</p>
+                    <p className="text-sm text-red-700 mt-1">{error}</p>
+                    <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                      <button
+                        onClick={resetAnalysis}
+                        className="text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 transition-colors"
+                      >
+                        重新开始分析
+                      </button>
+                      <button
+                        onClick={() => window.location.reload()}
+                        className="text-sm bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 transition-colors"
+                      >
+                        刷新页面
+                      </button>
+                    </div>
+                    <div className="mt-2 text-xs text-red-600">
+                      <strong>提示：</strong>如果是下载问题，分析结果已保存在界面中，可重试下载。
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-                          <div className="mt-6 flex justify-center gap-4">
+            <div className="mt-6 flex justify-center gap-4">
+              <button
+                onClick={handleUpload}
+                disabled={!file || uploading}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                {uploading ? 'Uploading...' : useMockData ? 'Start Demo Analysis' : 'Start Real Analysis'}
+              </button>
+              
+              {!useMockData && (
                 <button
-                  onClick={handleUpload}
-                  disabled={!file || uploading}
-                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  onClick={handleTestWithSampleFile}
+                  disabled={uploading}
+                  className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
-                  {uploading ? 'Uploading...' : useMockData ? 'Start Demo Analysis' : 'Start Real Analysis'}
+                  Test with Sample CSV
                 </button>
-                
-                {!useMockData && (
-                  <button
-                    onClick={handleTestWithSampleFile}
-                    disabled={uploading}
-                    className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Test with Sample CSV
-                  </button>
-                )}
-              </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -653,7 +773,7 @@ test_creator_3,Tech Enthusiast,false,,25000`;
                         </button>
                       </div>
                       <div className="mt-2 text-xs text-red-600">
-                        <strong>提示：</strong>这通常是因为服务器重启或任务文件被清理。重新上传文件即可解决问题。
+                        <strong>提示：</strong>如果是下载问题，分析结果已保存在界面中，可重试下载。
                       </div>
                     </div>
                   </div>
