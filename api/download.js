@@ -88,15 +88,27 @@ export default async function handler(req, res) {
 }
 
 function generateCSVContent(results) {
-  // CSV字段定义
+  // CSV字段定义（匹配期望的报告格式）
   const fieldnames = [
+    'video_id',
     'author_unique_id', 
+    'author_link',
     'signature',
-    'is_brand',
-    'brand_name',
-    'author_followers_count',
     'account_type',
-    'confidence_score'
+    'brand',
+    'email',
+    'recent_20_posts_views_avg',
+    'recent_20_posts_like_avg',
+    'recent_20_posts_share_avg',
+    'posting_frequency',
+    'stability_score',
+    'brand_confidence',
+    'analysis_details',
+    'author_followers_count',
+    'author_followings_count',
+    'videoCount',
+    'author_avatar',
+    'create_times'
   ];
 
   // 生成CSV头部
@@ -106,13 +118,25 @@ function generateCSVContent(results) {
   results.forEach(result => {
     // 清理和转义数据
     const row = [
+      escapeCSVField(result.video_id || ''),
       escapeCSVField(result.author_unique_id || ''),
+      escapeCSVField(result.author_link || ''),
       escapeCSVField(result.signature || ''),
-      result.is_brand ? 'true' : 'false',
-      escapeCSVField(result.brand_name || ''),
+      escapeCSVField(result.account_type || 'ugc creator'),
+      escapeCSVField(result.brand || ''),
+      escapeCSVField(result.email || ''),
+      result.recent_20_posts_views_avg || 0,
+      result.recent_20_posts_like_avg || 0,
+      result.recent_20_posts_share_avg || 0,
+      result.posting_frequency || 0,
+      result.stability_score || 0,
+      result.brand_confidence || 0,
+      escapeCSVField(result.analysis_details || ''),
       result.author_followers_count || 0,
-      escapeCSVField(result.account_type || 'ugc_creator'),
-      result.confidence_score || 0
+      result.author_followings_count || 0,
+      result.videoCount || 0,
+      escapeCSVField(result.author_avatar || ''),
+      escapeCSVField(result.create_times || '')
     ];
 
     csvContent += row.join(',') + '\n';

@@ -122,7 +122,46 @@ const BrandAnalyzerDashboard = () => {
       if (response.ok) {
         const data = await response.json();
         setTaskId(data.task_id);
-        setStatus('processing');
+        
+        if (data.status === 'completed' && data.results) {
+          // 分析已完成，直接显示结果
+          setStatus('completed');
+          
+          // 映射后端数据结构到前端期望的格式
+          const backendResults = data.results;
+          const mappedResults = {
+            total_processed: backendResults.total_processed || 0,
+            brand_related_count: backendResults.brand_related_count || 0,
+            non_brand_count: backendResults.non_brand_count || 0,
+            // 各类型在总创作者中的数量
+            official_account_count: backendResults.official_account_count || 0,
+            matrix_account_count: backendResults.matrix_account_count || 0,
+            ugc_creator_count: backendResults.ugc_creator_count || 0,
+            non_branded_creator_count: backendResults.non_branded_creator_count || 0,
+            // 各类型在总创作者中的百分比
+            official_account_percentage: backendResults.official_account_percentage || 0,
+            matrix_account_percentage: backendResults.matrix_account_percentage || 0,
+            ugc_creator_percentage: backendResults.ugc_creator_percentage || 0,
+            non_branded_creator_percentage: backendResults.non_branded_creator_percentage || 0,
+            // Brand Related Breakdown - 在品牌相关账号中的数量和百分比
+            brand_in_related: backendResults.brand_in_related || 0,
+            matrix_in_related: backendResults.matrix_in_related || 0,
+            ugc_in_related: backendResults.ugc_in_related || 0,
+            brand_in_related_percentage: backendResults.brand_in_related_percentage || 0,
+            matrix_in_related_percentage: backendResults.matrix_in_related_percentage || 0,
+            ugc_in_related_percentage: backendResults.ugc_in_related_percentage || 0,
+            brand_file: backendResults.brand_file,
+            non_brand_file: backendResults.non_brand_file
+          };
+          setResults(mappedResults);
+          setLogs(['文件上传成功', '分析完成', `处理了 ${mappedResults.total_processed} 个创作者`]);
+        } else if (data.status === 'error') {
+          setStatus('error');
+          setError(data.error || '分析过程中发生错误');
+        } else {
+          // 如果分析还在进行中，设置为处理状态
+          setStatus('processing');
+        }
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Upload failed');
@@ -144,6 +183,89 @@ const BrandAnalyzerDashboard = () => {
     } else {
       // 真实分析模式
       await handleRealUpload();
+    }
+  };
+
+  // 使用示例CSV文件测试
+  const handleTestWithSampleFile = async () => {
+    setUploading(true);
+    setError(null);
+
+    try {
+      // 获取示例CSV文件
+      const response = await fetch('/test_tiktok_sample.csv');
+      if (!response.ok) {
+        throw new Error('Failed to load sample file');
+      }
+      
+      const csvContent = await response.text();
+      
+      // 创建模拟文件对象
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const file = new File([blob], 'test_tiktok_sample.csv', { type: 'text/csv' });
+      
+      // 创建FormData
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // 上传文件
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (uploadResponse.ok) {
+        const data = await uploadResponse.json();
+        setTaskId(data.task_id);
+        
+        if (data.status === 'completed' && data.results) {
+          // 分析已完成，直接显示结果
+          setStatus('completed');
+          
+          // 映射后端数据结构到前端期望的格式
+          const backendResults = data.results;
+          const mappedResults = {
+            total_processed: backendResults.total_processed || 0,
+            brand_related_count: backendResults.brand_related_count || 0,
+            non_brand_count: backendResults.non_brand_count || 0,
+            // 各类型在总创作者中的数量
+            official_account_count: backendResults.official_account_count || 0,
+            matrix_account_count: backendResults.matrix_account_count || 0,
+            ugc_creator_count: backendResults.ugc_creator_count || 0,
+            non_branded_creator_count: backendResults.non_branded_creator_count || 0,
+            // 各类型在总创作者中的百分比
+            official_account_percentage: backendResults.official_account_percentage || 0,
+            matrix_account_percentage: backendResults.matrix_account_percentage || 0,
+            ugc_creator_percentage: backendResults.ugc_creator_percentage || 0,
+            non_branded_creator_percentage: backendResults.non_branded_creator_percentage || 0,
+            // Brand Related Breakdown - 在品牌相关账号中的数量和百分比
+            brand_in_related: backendResults.brand_in_related || 0,
+            matrix_in_related: backendResults.matrix_in_related || 0,
+            ugc_in_related: backendResults.ugc_in_related || 0,
+            brand_in_related_percentage: backendResults.brand_in_related_percentage || 0,
+            matrix_in_related_percentage: backendResults.matrix_in_related_percentage || 0,
+            ugc_in_related_percentage: backendResults.ugc_in_related_percentage || 0,
+            brand_file: backendResults.brand_file,
+            non_brand_file: backendResults.non_brand_file
+          };
+          setResults(mappedResults);
+          setLogs(['示例CSV文件上传成功', '分析完成', `处理了 ${mappedResults.total_processed} 个创作者`]);
+          setFile({ name: 'test_tiktok_sample.csv' }); // 设置文件显示
+        } else if (data.status === 'error') {
+          setStatus('error');
+          setError(data.error || '分析过程中发生错误');
+        } else {
+          // 如果分析还在进行中，设置为处理状态
+          setStatus('processing');
+        }
+      } else {
+        const errorData = await uploadResponse.json();
+        setError(errorData.error || 'Upload failed');
+      }
+    } catch (error) {
+      setError('Test file upload error: ' + error.message);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -443,15 +565,25 @@ test_creator_3,Tech Enthusiast,false,,25000`;
               </div>
             )}
 
-            <div className="mt-6 flex justify-center">
-              <button
-                onClick={handleUpload}
-                disabled={!file || uploading}
-                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-              >
-                {uploading ? 'Uploading...' : useMockData ? 'Start Demo Analysis' : 'Start Real Analysis'}
-              </button>
-            </div>
+                          <div className="mt-6 flex justify-center gap-4">
+                <button
+                  onClick={handleUpload}
+                  disabled={!file || uploading}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {uploading ? 'Uploading...' : useMockData ? 'Start Demo Analysis' : 'Start Real Analysis'}
+                </button>
+                
+                {!useMockData && (
+                  <button
+                    onClick={handleTestWithSampleFile}
+                    disabled={uploading}
+                    className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Test with Sample CSV
+                  </button>
+                )}
+              </div>
           </div>
         )}
 

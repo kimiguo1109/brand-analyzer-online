@@ -31,10 +31,10 @@ export default async function handler(req, res) {
 
   if (!task) {
     return res.status(404).json({ 
-      error: 'Task data corrupted',
-      message: '任务数据损坏，请重新上传文件',
-      code: 'TASK_CORRUPTED',
-      suggestion: '任务文件存在但无法读取。请重新开始分析。'
+      error: 'Task not found or expired',
+      message: '分析任务已过期或被清理，请重新上传文件',
+      code: 'TASK_NOT_FOUND',
+      suggestion: '这可能是因为服务器重启或任务数据被清理。请重新上传文件开始新的分析。'
     });
   }
 
