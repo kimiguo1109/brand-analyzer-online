@@ -1,4 +1,4 @@
-import BrandAnalyzerDashboard from './components/BrandAnalyzerDashboard';
+import BrandAnalyzerDashboard from './components/BrandAnalyzerDashboard.js';
 
 function App() {
   return (
