@@ -4,8 +4,19 @@ global.analysisCache = global.analysisCache || new Map();
 import { promises as fs } from 'fs';
 import path from 'path';
 
+// 检查是否在无服务器环境中
+const isServerlessEnvironment = () => {
+  return process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY;
+};
+
 // 从文件系统恢复任务
 async function recoverTaskFromFile(taskId) {
+  // 在无服务器环境中跳过文件恢复
+  if (isServerlessEnvironment()) {
+    console.log(`[Status] 跳过文件恢复 ${taskId} - 无服务器环境`);
+    return null;
+  }
+  
   try {
     const taskPath = path.join('/tmp/tasks', `${taskId}.json`);
     const taskData = await fs.readFile(taskPath, 'utf-8');
@@ -15,7 +26,11 @@ async function recoverTaskFromFile(taskId) {
     global.analysisCache.set(taskId, task);
     return task;
   } catch (error) {
-    console.error(`[Status] 从文件恢复任务失败 ${taskId}:`, error);
+    if (error.code === 'ENOENT') {
+      console.log(`[Status] 任务文件不存在 ${taskId} - 这在无服务器环境中是正常的`);
+    } else {
+      console.error(`[Status] 从文件恢复任务失败 ${taskId}:`, error.message);
+    }
     return null;
   }
 }
@@ -36,13 +51,20 @@ async function loadTaskFromMemory(taskId) {
       console.log(`[Status] 找到任务 ${taskId}，状态: ${task.status}, 进度: ${task.progress}%`);
       return JSON.parse(JSON.stringify(task)); // 深拷贝
     } else {
-      console.log(`[Status] 任务 ${taskId} 不在内存缓存中，尝试从文件恢复`);
-      // 尝试从文件系统恢复
-      task = await recoverTaskFromFile(taskId);
-      if (task) {
-        return JSON.parse(JSON.stringify(task)); // 深拷贝
+      console.log(`[Status] 任务 ${taskId} 不在内存缓存中`);
+      
+      // 只在非无服务器环境中尝试文件恢复
+      if (!isServerlessEnvironment()) {
+        console.log(`[Status] 尝试从文件恢复任务 ${taskId}`);
+        task = await recoverTaskFromFile(taskId);
+        if (task) {
+          return JSON.parse(JSON.stringify(task)); // 深拷贝
+        }
+      } else {
+        console.log(`[Status] 无服务器环境 - 跳过文件恢复，任务可能在不同的函数实例中处理`);
       }
-      console.log(`[Status] 任务 ${taskId} 在文件中也不存在`);
+      
+      console.log(`[Status] 任务 ${taskId} 无法找到或恢复`);
       return null;
     }
   } catch (error) {
@@ -68,23 +90,36 @@ export default async function handler(req, res) {
   if (!task) {
     // 提供更详细的错误信息
     const cacheKeys = Array.from(global.analysisCache.keys());
+    const isServerless = isServerlessEnvironment();
     const cacheInfo = {
       cache_size: global.analysisCache.size,
       existing_tasks: cacheKeys,
-      requested_task: task_id
+      requested_task: task_id,
+      environment: isServerless ? 'serverless' : 'server'
     };
     
     console.error(`[Status] 任务查找失败详情:`, cacheInfo);
     
+    // 在无服务器环境中提供更友好的错误消息
+    const errorMessage = isServerless 
+      ? '任务可能在另一个服务器实例中处理，这在无服务器环境中是正常的。请重新上传文件开始新的分析。'
+      : '分析任务已过期或被清理，请重新上传文件';
+    
+    const suggestion = isServerless
+      ? '无服务器环境中任务状态不会在函数调用之间持久化。如果任务正在处理中，请稍候片刻后重试，或重新上传文件。'
+      : '这可能是因为服务器重启或任务数据被清理。请重新上传文件开始新的分析。';
+    
     return res.status(404).json({ 
-      error: 'Task not found or expired',
-      message: '分析任务已过期或被清理，请重新上传文件',
+      error: 'Task not found',
+      message: errorMessage,
       code: 'TASK_NOT_FOUND',
-      suggestion: '这可能是因为服务器重启或任务数据被清理。请重新上传文件开始新的分析。',
+      suggestion: suggestion,
       debug_info: {
-        message: '任务可能在处理过程中丢失',
+        message: isServerless ? '无服务器环境任务状态不持久化' : '任务可能在处理过程中丢失',
         cache_size: global.analysisCache.size,
         existing_task_count: cacheKeys.length,
+        environment: isServerless ? 'serverless' : 'server',
+        serverless_note: isServerless ? '在无服务器环境中，任务状态在函数调用之间不会保持' : null,
         timestamp: new Date().toISOString()
       }
     });

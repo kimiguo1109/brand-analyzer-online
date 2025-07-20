@@ -356,7 +356,14 @@ const BrandAnalyzerDashboard = () => {
           const errorData = await response.json();
           console.warn('Task not found, stopping polling:', errorData);
           setStatus('error');
-          setError(errorData.message || '分析任务已过期或被清理，请重新上传文件');
+          
+          // 根据环境提供不同的错误消息
+          const isServerlessEnvironment = errorData.debug_info?.environment === 'serverless';
+          const errorMessage = isServerlessEnvironment 
+            ? '任务状态丢失（无服务器环境常见问题）。请重新上传文件或稍候重试。'
+            : errorData.message || '分析任务已过期或被清理，请重新上传文件';
+          
+          setError(errorMessage);
           return;
         }
         

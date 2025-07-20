@@ -5,8 +5,18 @@ import { v4 as uuidv4 } from 'uuid';
 import Papa from 'papaparse';
 import BrandAnalyzer from './brand-analyzer.js';
 
+// 检查是否在无服务器环境中
+const isServerlessEnvironment = () => {
+  return process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY;
+};
+
 // 确保任务目录存在
 async function ensureTasksDir() {
+  if (isServerlessEnvironment()) {
+    console.log('[Persist] 跳过目录创建 - 无服务器环境');
+    return;
+  }
+  
   try {
     await fs.mkdir('/tmp/tasks', { recursive: true });
   } catch (error) {
@@ -16,6 +26,11 @@ async function ensureTasksDir() {
 
 // 持久化任务到文件系统
 async function persistTask(taskId, task) {
+  if (isServerlessEnvironment()) {
+    console.log(`[Persist] 跳过文件持久化 ${taskId} - 无服务器环境`);
+    return;
+  }
+  
   try {
     await ensureTasksDir();
     const taskPath = path.join('/tmp/tasks', `${taskId}.json`);
@@ -28,6 +43,11 @@ async function persistTask(taskId, task) {
 
 // 从文件系统恢复任务
 async function recoverTask(taskId) {
+  if (isServerlessEnvironment()) {
+    console.log(`[Recover] 跳过文件恢复 ${taskId} - 无服务器环境`);
+    return null;
+  }
+  
   try {
     const taskPath = path.join('/tmp/tasks', `${taskId}.json`);
     const taskData = await fs.readFile(taskPath, 'utf-8');
@@ -35,7 +55,11 @@ async function recoverTask(taskId) {
     console.log(`[Recover] 从文件恢复任务 ${taskId}`);
     return task;
   } catch (error) {
-    console.error(`[Recover] 恢复任务失败 ${taskId}:`, error);
+    if (error.code === 'ENOENT') {
+      console.log(`[Recover] 任务文件不存在 ${taskId} - 这在无服务器环境中是正常的`);
+    } else {
+      console.error(`[Recover] 恢复任务失败 ${taskId}:`, error.message);
+    }
     return null;
   }
 }
@@ -147,7 +171,7 @@ export default async function handler(req, res) {
       global.analysisCache.set(analysisId, task);
       console.log(`[Upload] 创建任务 ${analysisId}，缓存大小: ${global.analysisCache.size}`);
       
-      // 持久化任务到文件系统
+      // 持久化任务到文件系统（仅在非无服务器环境中）
       await persistTask(analysisId, task);
       
       // 异步处理
@@ -207,19 +231,24 @@ async function performAsyncAnalysis(uniqueCreators, analysisId) {
     try {
       let task = global.analysisCache.get(analysisId);
       if (!task) {
-        // 如果任务不存在，尝试从文件系统恢复
-        console.warn(`[Upload] 任务 ${analysisId} 不在缓存中，尝试从文件恢复`);
-        task = await recoverTask(analysisId);
+        // 在非无服务器环境中尝试从文件系统恢复
+        if (!isServerlessEnvironment()) {
+          console.warn(`[Upload] 任务 ${analysisId} 不在缓存中，尝试从文件恢复`);
+          task = await recoverTask(analysisId);
+        } else {
+          console.warn(`[Upload] 任务 ${analysisId} 不在缓存中，无服务器环境跳过文件恢复`);
+        }
         
         if (!task) {
           // 如果文件也没有，重新创建基础任务结构
-          console.warn(`[Upload] 任务 ${analysisId} 文件也不存在，重新创建`);
+          const environmentNote = isServerlessEnvironment() ? '无服务器环境' : '文件也不存在';
+          console.warn(`[Upload] 任务 ${analysisId} ${environmentNote}，重新创建`);
           task = {
             id: analysisId,
             status: 'processing',
             createdAt: new Date().toISOString(),
             progress: 0,
-            logs: ['🔄 任务恢复中...'],
+            logs: isServerlessEnvironment() ? ['🔄 无服务器环境任务重建...'] : ['🔄 任务恢复中...'],
             processedCount: 0,
             totalCount: uniqueCreators.length
           };
@@ -237,7 +266,7 @@ async function performAsyncAnalysis(uniqueCreators, analysisId) {
       
       global.analysisCache.set(analysisId, task);
       
-      // 持久化更新到文件系统
+      // 持久化更新到文件系统（仅在非无服务器环境中）
       await persistTask(analysisId, task);
       
       console.log(`[Upload] 更新任务 ${analysisId}，进度: ${updates.progress || task.progress}%，状态: ${updates.status || task.status}`);
