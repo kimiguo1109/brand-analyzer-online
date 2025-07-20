@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import axios from 'axios';
+import fetch from 'node-fetch';
 
 // API配置
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyB8GkbKtlc9OfyHE2c_wasXpCatYRC11IY';
@@ -49,35 +49,34 @@ class BrandAnalyzer {
             return this.getDefaultUserInfo();
         }
 
-        const url = "https://tiktok-scraper7.p.rapidapi.com/user/info";
-        const config = {
-            method: 'GET',
-            url: url,
-            params: { unique_id: uniqueId },
-            headers: {
-                'x-rapidapi-key': RAPIDAPI_KEY,
-                'x-rapidapi-host': 'tiktok-scraper7.p.rapidapi.com'
-            },
-            timeout: 10000
-        };
-
+        const url = `https://tiktok-scraper7.p.rapidapi.com/user/info?unique_id=${encodeURIComponent(uniqueId)}`;
+        
         try {
-            const response = await axios(config);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'x-rapidapi-key': RAPIDAPI_KEY,
+                    'x-rapidapi-host': 'tiktok-scraper7.p.rapidapi.com'
+                }
+            });
             
-            if (response.status === 200 && response.data.code === 0 && response.data.data) {
-                const userData = response.data.data.user || {};
-                const statsData = response.data.data.stats || {};
-                
-                return {
-                    signature: userData.signature || '',
-                    followerCount: statsData.followerCount || 0,
-                    followingCount: statsData.followingCount || 0,
-                    videoCount: statsData.videoCount || 0,
-                    avatar: userData.avatarThumb || '',
-                    author_followers_count: statsData.followerCount || 0,
-                    author_followings_count: statsData.followingCount || 0,
-                    author_avatar: userData.avatarThumb || ''
-                };
+            if (response.ok) {
+                const data = await response.json();
+                if (data.code === 0 && data.data) {
+                    const userData = data.data.user || {};
+                    const statsData = data.data.stats || {};
+                    
+                    return {
+                        signature: userData.signature || '',
+                        followerCount: statsData.followerCount || 0,
+                        followingCount: statsData.followingCount || 0,
+                        videoCount: statsData.videoCount || 0,
+                        avatar: userData.avatarThumb || '',
+                        author_followers_count: statsData.followerCount || 0,
+                        author_followings_count: statsData.followingCount || 0,
+                        author_avatar: userData.avatarThumb || ''
+                    };
+                }
             }
         } catch (error) {
             console.warn(`获取TikTok用户信息失败 ${uniqueId}:`, error.message);
@@ -88,49 +87,66 @@ class BrandAnalyzer {
 
     // 获取TikTok用户最近视频
     async getTikTokUserPosts(uniqueId, count = 20) {
-        const url = "https://tiktok-scraper7.p.rapidapi.com/user/posts";
-        const config = {
-            method: 'GET',
-            url: url,
-            params: {
-                unique_id: uniqueId,
-                count: count,
-                cursor: 0
-            },
-            headers: {
-                'x-rapidapi-key': RAPIDAPI_KEY,
-                'x-rapidapi-host': 'tiktok-scraper7.p.rapidapi.com'
-            },
-            timeout: 15000
-        };
+        const url = `https://tiktok-scraper7.p.rapidapi.com/user/posts?unique_id=${encodeURIComponent(uniqueId)}&count=${count}&cursor=0`;
 
         const maxRetries = 3;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                const response = await axios(config);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'x-rapidapi-key': RAPIDAPI_KEY,
+                        'x-rapidapi-host': 'tiktok-scraper7.p.rapidapi.com'
+                    }
+                });
                 
-                if (response.status === 200 && response.data.code === 0 && 
-                    response.data.data && response.data.data.videos) {
-                    
-                    const videos = response.data.data.videos;
-                    return videos.map(video => ({
-                        video_id: video.video_id || '',
-                        title: video.title || '',
-                        play_count: video.play_count || 0,
-                        digg_count: video.digg_count || 0,
-                        share_count: video.share_count || 0,
-                        create_time: video.create_time || 0
-                    }));
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.code === 0 && data.data && data.data.videos) {
+                        const videos = data.data.videos;
+                        const videoData = videos.map(video => ({
+                            video_id: video.video_id || '',
+                            title: video.title || '',
+                            play_count: video.play_count || 0,
+                            digg_count: video.digg_count || 0,
+                            share_count: video.share_count || 0,
+                            create_time: video.create_time || 0
+                        }));
+                        
+                        console.log(`获取到用户 ${uniqueId} 的 ${videoData.length} 个视频数据`);
+                        return videoData;
+                    } else {
+                        console.warn(`TikTok API返回错误: ${data.msg || 'Unknown error'}`);
+                        if (attempt < maxRetries - 1) {
+                            console.log(`TikTok API请求失败，正在重试... (尝试 ${attempt + 2}/${maxRetries})`);
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            continue;
+                        }
+                        return [];
+                    }
+                } else {
+                    console.warn(`TikTok API请求失败: ${response.status}`);
+                    if (attempt < maxRetries - 1) {
+                        console.log(`TikTok API请求失败，正在重试... (尝试 ${attempt + 2}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+                    return [];
                 }
+                    
             } catch (error) {
-                console.warn(`获取用户 ${uniqueId} 视频数据失败 (尝试 ${attempt + 1}/${maxRetries}):`, error.message);
+                console.error(`获取用户 ${uniqueId} 视频数据失败: ${error.message}`);
                 if (attempt < maxRetries - 1) {
+                    console.log(`TikTok API请求异常，正在重试... (尝试 ${attempt + 2}/${maxRetries})`);
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     continue;
                 }
+                return [];
             }
         }
         
+        // 如果所有重试都失败了
+        console.error(`TikTok API请求失败，已重试 ${maxRetries} 次`);
         return [];
     }
 
