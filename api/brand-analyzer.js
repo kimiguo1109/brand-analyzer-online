@@ -681,6 +681,133 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
         return result;
     }
 
+    // 批量分析创作者
+    async analyzeCreators(creators, progressCallback = null) {
+        const results = [];
+        const batchSize = 3; // 批处理大小，避免API限制
+        
+        console.log(`🚀 开始批量分析 ${creators.length} 个创作者`);
+        
+        for (let i = 0; i < creators.length; i += batchSize) {
+            const batch = creators.slice(i, i + batchSize);
+            const batchNum = Math.floor(i / batchSize) + 1;
+            const totalBatches = Math.ceil(creators.length / batchSize);
+            
+            console.log(`📦 处理批次 ${batchNum}/${totalBatches} (${batch.length} 个创作者)`);
+            
+            // 并发处理批次内的创作者
+            const batchPromises = batch.map(async (creator) => {
+                try {
+                    // 转换数据格式为analyzeCreator期望的格式
+                    const creatorData = {
+                        author_unique_id: creator.unique_id,
+                        author_nickname: creator.display_name || creator.unique_id,
+                        title: creator.title || '',
+                        create_time: creator.create_time || '',
+                        signature: creator.signature || ''
+                    };
+                    
+                    const result = await this.analyzeCreator(creatorData);
+                    return result;
+                } catch (error) {
+                    console.error(`❌ 分析创作者失败 ${creator.unique_id}:`, error.message);
+                    return null; // 失败的分析返回null
+                }
+            });
+            
+            const batchResults = await Promise.all(batchPromises);
+            const validResults = batchResults.filter(r => r !== null);
+            results.push(...validResults);
+            
+            // 更新进度
+            const progress = Math.floor(((i + batch.length) / creators.length) * 100);
+            const message = `处理批次 ${batchNum}/${totalBatches}，成功: ${validResults.length}/${batch.length}`;
+            
+            if (progressCallback) {
+                progressCallback(progress, message);
+            }
+            
+            console.log(`📊 批次 ${batchNum} 完成，成功: ${validResults.length}/${batch.length}`);
+            
+            // 批次间延迟，避免API限制
+            if (i + batchSize < creators.length) {
+                console.log('⏳ API调用间隔...');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+        
+        // 统计和分类结果
+        const brandRelated = results.filter(r => {
+            if (r.account_type === 'official account' || r.account_type === 'matrix account') {
+                return true;
+            }
+            if (r.account_type === 'ugc creator' && r.brand && r.brand.trim()) {
+                // 检查分析详情是否明确说没有品牌合作
+                const analysisDetails = (r.analysis_details || '').toLowerCase();
+                const noPartnership = [
+                    'no indication of a brand partnership',
+                    'no clear brand partnership',
+                    'no significant brand indicators'
+                ].some(indicator => analysisDetails.includes(indicator));
+                return !noPartnership;
+            }
+            return false;
+        });
+        
+        const nonBrand = results.filter(r => !brandRelated.includes(r));
+        
+        // 分类统计
+        const officialCount = results.filter(r => r.account_type === 'official account').length;
+        const matrixCount = results.filter(r => r.account_type === 'matrix account').length;
+        const ugcCount = results.filter(r => r.account_type === 'ugc creator').length;
+        const nonBrandedCount = results.filter(r => r.account_type === 'non-branded creator').length;
+        
+        // 品牌分布统计
+        const brandDistribution = {};
+        brandRelated.forEach(r => {
+            if (r.brand && r.brand.trim()) {
+                const brand = r.brand.trim();
+                if (!brandDistribution[brand]) {
+                    brandDistribution[brand] = { official: 0, matrix: 0, ugc: 0, total: 0 };
+                }
+                if (r.account_type === 'official account') {
+                    brandDistribution[brand].official++;
+                } else if (r.account_type === 'matrix account') {
+                    brandDistribution[brand].matrix++;
+                } else {
+                    brandDistribution[brand].ugc++;
+                }
+                brandDistribution[brand].total++;
+            }
+        });
+        
+        const analysisResults = {
+            total_processed: results.length,
+            brand_related_count: brandRelated.length,
+            non_brand_count: nonBrand.length,
+            
+            // 详细分类统计
+            official_brand_count: officialCount,
+            matrix_account_count: matrixCount,
+            ugc_creator_count: ugcCount,
+            non_branded_creator_count: nonBrandedCount,
+            
+            // 品牌分布
+            brand_distribution: brandDistribution,
+            unique_brands_count: Object.keys(brandDistribution).length,
+            
+            // 数据数组
+            brand_related_data: brandRelated,
+            non_brand_data: nonBrand,
+            all_data: results
+        };
+        
+        console.log(`✅ 批量分析完成: 处理了 ${results.length} 个创作者`);
+        console.log(`📊 品牌相关: ${brandRelated.length}, 非品牌: ${nonBrand.length}`);
+        
+        return analysisResults;
+    }
+
     // 生成视频ID
     generateVideoId() {
         return '7' + Math.floor(Math.random() * 900000000000000000 + 100000000000000000).toString();
