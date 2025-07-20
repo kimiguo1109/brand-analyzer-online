@@ -725,52 +725,82 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
         
         console.log(`🚀 开始批量分析 ${creators.length} 个创作者`);
         
-        for (let i = 0; i < creators.length; i += batchSize) {
-            const batch = creators.slice(i, i + batchSize);
-            const batchNum = Math.floor(i / batchSize) + 1;
-            const totalBatches = Math.ceil(creators.length / batchSize);
-            
-            console.log(`📦 处理批次 ${batchNum}/${totalBatches} (${batch.length} 个创作者)`);
-            
-            // 并发处理批次内的创作者
-            const batchPromises = batch.map(async (creator) => {
+        try {
+            for (let i = 0; i < creators.length; i += batchSize) {
+                const batch = creators.slice(i, i + batchSize);
+                const batchNum = Math.floor(i / batchSize) + 1;
+                const totalBatches = Math.ceil(creators.length / batchSize);
+                
+                console.log(`📦 处理批次 ${batchNum}/${totalBatches} (${batch.length} 个创作者)`);
+                
                 try {
-                    // 转换数据格式为analyzeCreator期望的格式
-                    const creatorData = {
-                        author_unique_id: creator.unique_id,
-                        author_nickname: creator.display_name || creator.unique_id,
-                        title: creator.title || '',
-                        create_time: creator.create_time || '',
-                        signature: creator.signature || ''
-                    };
+                    // 并发处理批次内的创作者
+                    const batchPromises = batch.map(async (creator) => {
+                        try {
+                            // 转换数据格式为analyzeCreator期望的格式
+                            const creatorData = {
+                                author_unique_id: creator.unique_id,
+                                author_nickname: creator.display_name || creator.unique_id,
+                                title: creator.title || '',
+                                create_time: creator.create_time || '',
+                                signature: creator.signature || ''
+                            };
+                            
+                            const result = await this.analyzeCreator(creatorData);
+                            return result;
+                        } catch (error) {
+                            console.error(`❌ 分析创作者失败 ${creator.unique_id}:`, error.message);
+                            return null; // 失败的分析返回null
+                        }
+                    });
                     
-                    const result = await this.analyzeCreator(creatorData);
-                    return result;
-                } catch (error) {
-                    console.error(`❌ 分析创作者失败 ${creator.unique_id}:`, error.message);
-                    return null; // 失败的分析返回null
+                    const batchResults = await Promise.all(batchPromises);
+                    const validResults = batchResults.filter(r => r !== null);
+                    results.push(...validResults);
+                    
+                    // 更新进度
+                    const progress = Math.floor(((i + batch.length) / creators.length) * 100);
+                    const message = `处理批次 ${batchNum}/${totalBatches}，成功: ${validResults.length}/${batch.length}`;
+                    
+                    if (progressCallback) {
+                        try {
+                            progressCallback(progress, message);
+                        } catch (callbackError) {
+                            console.error('进度回调函数错误:', callbackError);
+                        }
+                    }
+                    
+                    console.log(`📊 批次 ${batchNum} 完成，成功: ${validResults.length}/${batch.length}`);
+                    
+                } catch (batchError) {
+                    console.error(`❌ 批次 ${batchNum} 处理失败:`, batchError);
+                    // 批次失败时，尝试逐个处理该批次中的创作者
+                    for (const creator of batch) {
+                        try {
+                            const creatorData = {
+                                author_unique_id: creator.unique_id,
+                                author_nickname: creator.display_name || creator.unique_id,
+                                title: creator.title || '',
+                                create_time: creator.create_time || '',
+                                signature: creator.signature || ''
+                            };
+                            const result = await this.analyzeCreator(creatorData);
+                            if (result) results.push(result);
+                        } catch (error) {
+                            console.error(`❌ 单个创作者分析失败 ${creator.unique_id}:`, error.message);
+                        }
+                    }
                 }
-            });
-            
-            const batchResults = await Promise.all(batchPromises);
-            const validResults = batchResults.filter(r => r !== null);
-            results.push(...validResults);
-            
-            // 更新进度
-            const progress = Math.floor(((i + batch.length) / creators.length) * 100);
-            const message = `处理批次 ${batchNum}/${totalBatches}，成功: ${validResults.length}/${batch.length}`;
-            
-            if (progressCallback) {
-                progressCallback(progress, message);
+                
+                // 批次间短暂延迟
+                if (i + batchSize < creators.length) {
+                    console.log('⏳ 批次间隔...');
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // 减少到1.5秒
+                }
             }
-            
-            console.log(`📊 批次 ${batchNum} 完成，成功: ${validResults.length}/${batch.length}`);
-            
-            // 批次间短暂延迟
-            if (i + batchSize < creators.length) {
-                console.log('⏳ 批次间隔...');
-                await new Promise(resolve => setTimeout(resolve, 1500)); // 减少到1.5秒
-            }
+        } catch (criticalError) {
+            console.error('❌ 批量分析过程中发生严重错误:', criticalError);
+            // 即使发生严重错误，也返回已处理的结果
         }
         
         // 统计和分类结果
@@ -839,7 +869,7 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
             all_data: results
         };
         
-        console.log(`✅ 批量分析完成: 处理了 ${results.length} 个创作者`);
+        console.log(`✅ 批量分析完成: 处理了 ${results.length}/${creators.length} 个创作者`);
         console.log(`📊 品牌相关: ${brandRelated.length}, 非品牌: ${nonBrand.length}`);
         
         return analysisResults;

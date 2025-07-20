@@ -5,6 +5,41 @@ import { v4 as uuidv4 } from 'uuid';
 import Papa from 'papaparse';
 import BrandAnalyzer from './brand-analyzer.js';
 
+// 确保任务目录存在
+async function ensureTasksDir() {
+  try {
+    await fs.mkdir('/tmp/tasks', { recursive: true });
+  } catch (error) {
+    // 目录可能已存在，忽略错误
+  }
+}
+
+// 持久化任务到文件系统
+async function persistTask(taskId, task) {
+  try {
+    await ensureTasksDir();
+    const taskPath = path.join('/tmp/tasks', `${taskId}.json`);
+    await fs.writeFile(taskPath, JSON.stringify(task, null, 2));
+    console.log(`[Persist] 任务 ${taskId} 已保存到文件`);
+  } catch (error) {
+    console.error(`[Persist] 保存任务失败 ${taskId}:`, error);
+  }
+}
+
+// 从文件系统恢复任务
+async function recoverTask(taskId) {
+  try {
+    const taskPath = path.join('/tmp/tasks', `${taskId}.json`);
+    const taskData = await fs.readFile(taskPath, 'utf-8');
+    const task = JSON.parse(taskData);
+    console.log(`[Recover] 从文件恢复任务 ${taskId}`);
+    return task;
+  } catch (error) {
+    console.error(`[Recover] 恢复任务失败 ${taskId}:`, error);
+    return null;
+  }
+}
+
 export const config = {
   api: {
     bodyParser: false,
@@ -112,6 +147,9 @@ export default async function handler(req, res) {
       global.analysisCache.set(analysisId, task);
       console.log(`[Upload] 创建任务 ${analysisId}，缓存大小: ${global.analysisCache.size}`);
       
+      // 持久化任务到文件系统
+      await persistTask(analysisId, task);
+      
       // 异步处理
       performAsyncAnalysis(uniqueCreators, analysisId);
       
@@ -165,40 +203,90 @@ async function performSyncAnalysis(uniqueCreators, analysisId) {
 
 // 异步分析（大文件，带进度更新）  
 async function performAsyncAnalysis(uniqueCreators, analysisId) {
-    const updateTaskStatus = (updates) => {
-    const task = global.analysisCache.get(analysisId);
-    if (task) {
+  const updateTaskStatus = async (updates) => {
+    try {
+      let task = global.analysisCache.get(analysisId);
+      if (!task) {
+        // 如果任务不存在，尝试从文件系统恢复
+        console.warn(`[Upload] 任务 ${analysisId} 不在缓存中，尝试从文件恢复`);
+        task = await recoverTask(analysisId);
+        
+        if (!task) {
+          // 如果文件也没有，重新创建基础任务结构
+          console.warn(`[Upload] 任务 ${analysisId} 文件也不存在，重新创建`);
+          task = {
+            id: analysisId,
+            status: 'processing',
+            createdAt: new Date().toISOString(),
+            progress: 0,
+            logs: ['🔄 任务恢复中...'],
+            processedCount: 0,
+            totalCount: uniqueCreators.length
+          };
+        }
+        global.analysisCache.set(analysisId, task);
+      }
+      
+      // 安全地合并更新
       Object.assign(task, updates, { lastUpdated: new Date().toISOString() });
+      
+      // 安全地合并日志
+      if (updates.logs) {
+        task.logs = updates.logs;
+      }
+      
       global.analysisCache.set(analysisId, task);
+      
+      // 持久化更新到文件系统
+      await persistTask(analysisId, task);
+      
       console.log(`[Upload] 更新任务 ${analysisId}，进度: ${updates.progress || task.progress}%，状态: ${updates.status || task.status}`);
-    } else {
-      console.error(`[Upload] 无法更新任务 ${analysisId} - 任务不在缓存中`);
+    } catch (error) {
+      console.error(`[Upload] 更新任务状态失败 ${analysisId}:`, error);
+    }
+  };
+
+  // 安全地获取当前日志
+  const getCurrentLogs = () => {
+    try {
+      const task = global.analysisCache.get(analysisId);
+      return task?.logs || ['🔄 分析开始...'];
+    } catch (error) {
+      console.error(`[Upload] 获取日志失败:`, error);
+      return ['🔄 分析开始...'];
     }
   };
 
   try {
     console.log(`[${analysisId}] 开始异步分析 ${uniqueCreators.length} 个创作者`);
-    updateTaskStatus({ 
-      logs: [...global.analysisCache.get(analysisId).logs, '🔄 初始化分析引擎...'],
+    await updateTaskStatus({ 
+      logs: [...getCurrentLogs(), '🔄 初始化分析引擎...'],
       progress: 10 
     });
 
     // 初始化品牌分析器
     const analyzer = new BrandAnalyzer();
-    updateTaskStatus({ 
-      logs: [...global.analysisCache.get(analysisId).logs, '🔍 开始智能品牌分析...'],
+    await updateTaskStatus({ 
+      logs: [...getCurrentLogs(), '🔍 开始智能品牌分析...'],
       progress: 20
     });
     
     // 分析创作者品牌关联（带进度回调）
     const analysisResults = await analyzer.analyzeCreators(uniqueCreators, (progress, message) => {
-      console.log(`[${analysisId}] ${message} (${progress}%)`);
-      const adjustedProgress = 20 + (progress * 0.75); // 20-95%范围
-      updateTaskStatus({ 
-        logs: [...global.analysisCache.get(analysisId).logs, `🤖 ${message}`],
-        progress: Math.round(adjustedProgress),
-        processedCount: Math.round((progress / 100) * uniqueCreators.length)
-      });
+      try {
+        console.log(`[${analysisId}] ${message} (${progress}%)`);
+        const adjustedProgress = 20 + (progress * 0.75); // 20-95%范围
+        // 进度回调需要异步处理，但不等待结果
+        updateTaskStatus({ 
+          logs: [...getCurrentLogs(), `🤖 ${message}`],
+          progress: Math.round(adjustedProgress),
+          processedCount: Math.round((progress / 100) * uniqueCreators.length)
+        }).catch(error => {
+          console.error(`[${analysisId}] 进度更新失败:`, error);
+        });
+      } catch (error) {
+        console.error(`[${analysisId}] 进度更新失败:`, error);
+      }
     });
 
     console.log(`[${analysisId}] 异步分析完成!`);
@@ -209,11 +297,11 @@ async function performAsyncAnalysis(uniqueCreators, analysisId) {
       total_processed: uniqueCreators.length
     };
     
-    updateTaskStatus({
+    await updateTaskStatus({
       status: 'completed',
       progress: 100,
       results: finalResults,
-      logs: [...global.analysisCache.get(analysisId).logs, '🎉 大文件分析完成!', `📊 成功分析了 ${uniqueCreators.length} 个创作者`]
+      logs: [...getCurrentLogs(), '🎉 大文件分析完成!', `📊 成功分析了 ${uniqueCreators.length} 个创作者`]
     });
     
     console.log(`✅ [${analysisId}] 异步任务完成: 处理了 ${uniqueCreators.length} 个创作者`);
@@ -222,10 +310,10 @@ async function performAsyncAnalysis(uniqueCreators, analysisId) {
     console.error(`[${analysisId}] 分析失败:`, error);
     
     // 更新为错误状态
-    updateTaskStatus({
+    await updateTaskStatus({
       status: 'error',
       error: error.message,
-      logs: [...(global.analysisCache.get(analysisId)?.logs || []), `❌ 分析失败: ${error.message}`]
+      logs: [...getCurrentLogs(), `❌ 分析失败: ${error.message}`]
     });
   }
 }
