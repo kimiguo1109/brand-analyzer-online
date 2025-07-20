@@ -161,11 +161,11 @@ const BrandAnalyzerDashboard = () => {
         const data = await response.json();
         
         if (data.status === 'completed' && data.results) {
-          // 小文件同步分析已完成，直接显示结果
+          // 文件分析已完成（小文件或无服务器环境中的大文件同步处理）
           setTaskId(data.task_id);
           setStatus('completed');
           
-          // 处理新的API响应格式
+          // 处理API响应格式
           const analysisResults = data.results;
           
           // 计算统计数据
@@ -179,49 +179,65 @@ const BrandAnalyzerDashboard = () => {
           const ugcCount = brandRelated.filter(r => r.account_type === 'ugc creator').length;
           const nonBrandedCount = nonBrand.length;
           
-          const mappedResults = {
+          // 计算百分比
+          const officialPercentage = Math.round((officialCount / totalProcessed) * 100);
+          const matrixPercentage = Math.round((matrixCount / totalProcessed) * 100);
+          const ugcPercentage = Math.round((ugcCount / totalProcessed) * 100);
+          const nonBrandedPercentage = Math.round((nonBrandedCount / totalProcessed) * 100);
+          
+          // 品牌相关账号中的分布
+          const brandRelatedCount = brandRelated.length;
+          const brandInRelatedPercentage = brandRelatedCount > 0 ? Math.round((officialCount / brandRelatedCount) * 100) : 0;
+          const matrixInRelatedPercentage = brandRelatedCount > 0 ? Math.round((matrixCount / brandRelatedCount) * 100) : 0;
+          const ugcInRelatedPercentage = brandRelatedCount > 0 ? Math.round((ugcCount / brandRelatedCount) * 100) : 0;
+          
+          const results = {
             total_processed: totalProcessed,
-            brand_related_count: brandRelated.length,
-            non_brand_count: nonBrand.length,
+            brand_related_count: brandRelatedCount,
+            non_brand_count: nonBrandedCount,
             
-            // 各类型在总创作者中的数量
+            // 各类型在总创作者中的数量和百分比
             official_account_count: officialCount,
             matrix_account_count: matrixCount,
             ugc_creator_count: ugcCount,
             non_branded_creator_count: nonBrandedCount,
+            official_account_percentage: officialPercentage,
+            matrix_account_percentage: matrixPercentage,
+            ugc_creator_percentage: ugcPercentage,
+            non_branded_creator_percentage: nonBrandedPercentage,
             
-            // 各类型在总创作者中的百分比
-            official_account_percentage: totalProcessed > 0 ? Math.round((officialCount / totalProcessed) * 100) : 0,
-            matrix_account_percentage: totalProcessed > 0 ? Math.round((matrixCount / totalProcessed) * 100) : 0,
-            ugc_creator_percentage: totalProcessed > 0 ? Math.round((ugcCount / totalProcessed) * 100) : 0,
-            non_branded_creator_percentage: totalProcessed > 0 ? Math.round((nonBrandedCount / totalProcessed) * 100) : 0,
-            
-            // Brand Related Breakdown - 在品牌相关账号中的数量和百分比
+            // Brand Related Breakdown
             brand_in_related: officialCount,
             matrix_in_related: matrixCount,
             ugc_in_related: ugcCount,
-            brand_in_related_percentage: brandRelated.length > 0 ? Math.round((officialCount / brandRelated.length) * 100) : 0,
-            matrix_in_related_percentage: brandRelated.length > 0 ? Math.round((matrixCount / brandRelated.length) * 100) : 0,
-            ugc_in_related_percentage: brandRelated.length > 0 ? Math.round((ugcCount / brandRelated.length) * 100) : 0,
+            brand_in_related_percentage: brandInRelatedPercentage,
+            matrix_in_related_percentage: matrixInRelatedPercentage,
+            ugc_in_related_percentage: ugcInRelatedPercentage,
             
-            // 数据文件（用于下载）
             brand_file: 'brand_related_creators.csv',
-            non_brand_file: 'non_brand_creators.csv',
-            
-            // 品牌分布数据
-            brand_distribution: analysisResults.brand_distribution || {},
-            unique_brands_count: analysisResults.unique_brands_count || 0
+            non_brand_file: 'non_brand_creators.csv'
           };
           
-          setResults(mappedResults);
+          setResults(results);
           setDetailedResults(analysisResults); // 存储完整的分析结果对象，包含分类数据
-          setLogs(data.analysis_logs || ['文件上传成功', '小文件快速分析完成']);
+          
+          // 设置完成日志
+          const completionMessage = data.message || '分析完成';
+          setLogs(data.analysis_logs || [
+            '📁 文件上传成功',
+            `📊 ${totalProcessed} 个创作者`,
+            '🤖 智能品牌分析完成',
+            `✅ ${completionMessage}`
+          ]);
           
         } else if (data.status === 'error') {
           setStatus('error');
           setError(data.error || '分析过程中发生错误');
+          if (data.suggestion) {
+            setError(prevError => `${prevError}\n建议：${data.suggestion}`);
+          }
         } else if (data.status === 'processing') {
-          // 大文件异步分析开始，设置任务ID并开始轮询
+          // 大文件异步分析开始（仅在本地环境），设置任务ID并开始轮询
           setTaskId(data.task_id);
           setStatus('processing');
           setLogs([
@@ -237,6 +253,9 @@ const BrandAnalyzerDashboard = () => {
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Upload failed');
+        if (errorData.suggestion) {
+          setError(prevError => `${prevError}\n建议：${errorData.suggestion}`);
+        }
         setStatus('error');
       }
     } catch (error) {

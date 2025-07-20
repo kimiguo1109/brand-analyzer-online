@@ -147,43 +147,79 @@ export default async function handler(req, res) {
       }
       
     } else {
-      console.log(`📊 大文件模式: ${uniqueCreators.length} 个创作者，异步处理`);
+      console.log(`📊 大文件模式: ${uniqueCreators.length} 个创作者，${isServerlessEnvironment() ? '同步处理（无服务器环境）' : '异步处理'}`);
       
-      // 创建任务记录
-      const task = {
-        id: analysisId,
-        status: 'processing',
-        filename: file.originalFilename,
-        createdAt: new Date().toISOString(),
-        progress: 0,
-        logs: [
-          '📁 文件上传成功', 
-          '🚀 启动品牌分析系统',
-          `👥 发现 ${uniqueCreators.length} 个创作者`,
-          '🤖 开始智能品牌分析...'
-        ],
-        processedCount: 0,
-        totalCount: uniqueCreators.length
-      };
-      
-      // 存储到全局内存
-      global.analysisCache = global.analysisCache || new Map();
-      global.analysisCache.set(analysisId, task);
-      console.log(`[Upload] 创建任务 ${analysisId}，缓存大小: ${global.analysisCache.size}`);
-      
-      // 持久化任务到文件系统（仅在非无服务器环境中）
-      await persistTask(analysisId, task);
-      
-      // 异步处理
-      performAsyncAnalysis(uniqueCreators, analysisId);
-      
-      // 立即返回任务ID
-      res.status(200).json({
-        task_id: analysisId,
-        status: 'processing',
-        message: `文件上传成功，正在分析 ${uniqueCreators.length} 个创作者...`,
-        total_count: uniqueCreators.length
-      });
+      // 在无服务器环境中，大文件也使用同步处理，但分批进行
+      if (isServerlessEnvironment()) {
+        try {
+          // 无服务器环境：同步处理，但有超时保护
+          console.log(`🔄 无服务器环境 - 同步分析 ${uniqueCreators.length} 个创作者`);
+          
+          // 设置较短的超时时间避免函数超时
+          const analysisPromise = performSyncAnalysis(uniqueCreators, analysisId);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('分析超时，请尝试分批上传文件')), 25000) // 25秒超时
+          );
+          
+          const analysisResult = await Promise.race([analysisPromise, timeoutPromise]);
+          
+          // 直接返回完整结果
+          res.status(200).json({
+            task_id: analysisId,
+            status: 'completed',
+            filename: file.originalFilename,
+            message: `无服务器环境同步分析完成，处理了 ${uniqueCreators.length} 个创作者`,
+            ...analysisResult
+          });
+          
+        } catch (error) {
+          console.error(`无服务器同步分析失败:`, error);
+          res.status(500).json({
+            error: '分析失败: ' + error.message,
+            status: 'error',
+            suggestion: error.message.includes('超时') 
+              ? '文件过大导致处理超时，建议分批上传较小的文件（每批100-200个创作者）'
+              : '分析过程中出现错误，请重试或联系支持'
+          });
+        }
+      } else {
+        // 本地环境：异步处理
+        // 创建任务记录
+        const task = {
+          id: analysisId,
+          status: 'processing',
+          filename: file.originalFilename,
+          createdAt: new Date().toISOString(),
+          progress: 0,
+          logs: [
+            '📁 文件上传成功', 
+            '🚀 启动品牌分析系统',
+            `👥 发现 ${uniqueCreators.length} 个创作者`,
+            '🤖 开始智能品牌分析...'
+          ],
+          processedCount: 0,
+          totalCount: uniqueCreators.length
+        };
+        
+        // 存储到全局内存
+        global.analysisCache = global.analysisCache || new Map();
+        global.analysisCache.set(analysisId, task);
+        console.log(`[Upload] 创建任务 ${analysisId}，缓存大小: ${global.analysisCache.size}`);
+        
+        // 持久化任务到文件系统（仅在非无服务器环境中）
+        await persistTask(analysisId, task);
+        
+        // 异步处理
+        performAsyncAnalysis(uniqueCreators, analysisId);
+        
+        // 立即返回任务ID
+        res.status(200).json({
+          task_id: analysisId,
+          status: 'processing',
+          message: `文件上传成功，正在分析 ${uniqueCreators.length} 个创作者...`,
+          total_count: uniqueCreators.length
+        });
+      }
     }
 
   } catch (error) {
