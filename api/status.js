@@ -1,16 +1,27 @@
-// 使用内存存储，确保访问全局任务存储
-global.tasks = global.tasks || new Map();
+import { promises as fs } from 'fs';
+import path from 'path';
 
-// 从内存加载任务
-function loadTaskFromMemory(taskId) {
+// 任务状态文件存储路径
+const TASKS_DIR = '/tmp/tasks';
+
+// 确保任务目录存在
+async function ensureTasksDir() {
   try {
-    const task = global.tasks.get(taskId);
-    if (task) {
-      return JSON.parse(JSON.stringify(task)); // 深拷贝
-    }
-    return null;
+    await fs.mkdir(TASKS_DIR, { recursive: true });
   } catch (error) {
-    console.error('Failed to load task from memory:', error);
+    // 目录可能已存在，忽略错误
+  }
+}
+
+// 从文件系统加载任务
+async function loadTaskFromFile(taskId) {
+  try {
+    await ensureTasksDir();
+    const taskPath = path.join(TASKS_DIR, `${taskId}.json`);
+    const taskData = await fs.readFile(taskPath, 'utf-8');
+    return JSON.parse(taskData);
+  } catch (error) {
+    console.error('Failed to load task from file:', error);
     return null;
   }
 }
@@ -26,8 +37,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID is required' });
   }
 
-  // 从内存获取任务状态
-  const task = loadTaskFromMemory(task_id);
+  // 从文件系统获取任务状态
+  const task = await loadTaskFromFile(task_id);
 
   if (!task) {
     return res.status(404).json({ 

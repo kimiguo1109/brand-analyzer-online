@@ -114,7 +114,7 @@ async function processFileAsync(taskId, fileContent, fileType) {
   try {
     // 更新状态
     task.logs.push('📊 解析文件数据...');
-    await saveTaskToFile(taskId, task);
+    saveTaskToFile(taskId, task);
 
     // 解析文件内容
     let creatorsData = [];
@@ -136,7 +136,7 @@ async function processFileAsync(taskId, fileContent, fileType) {
     task.logs.push('   • 📱 TikHub API 获取用户数据');
     task.logs.push('   • 📊 视频指标计算');
     task.logs.push('   • 🏷️ 品牌关联分析');
-    await saveTaskToFile(taskId, task);
+    saveTaskToFile(taskId, task);
 
     // 初始化品牌分析器
     console.log(`🚀 [${taskId}] 初始化品牌分析器`);
@@ -151,7 +151,7 @@ async function processFileAsync(taskId, fileContent, fileType) {
       const totalBatches = Math.ceil(uniqueCreators.length/batchSize);
       
       task.logs.push(`🔄 处理批次 ${batchNum}/${totalBatches} (${batch.length} 个创作者)`);
-      await saveTaskToFile(taskId, task);
+      saveTaskToFile(taskId, task);
 
       console.log(`📦 [${taskId}] 处理批次 ${batchNum}/${totalBatches}`);
 
@@ -170,14 +170,14 @@ async function processFileAsync(taskId, fileContent, fileType) {
           const confidence = result.brand_confidence ? ` (置信度: ${(result.brand_confidence * 100).toFixed(0)}%)` : '';
           
           task.logs.push(`✅ ${result.author_unique_id}: ${accountType}${brandInfo}${confidence}`);
-          await saveTaskToFile(taskId, task);
+          saveTaskToFile(taskId, task);
           
           console.log(`✅ [${taskId}] 完成: ${result.author_unique_id} - ${accountType}`);
           return result;
         } catch (error) {
           console.error(`❌ [${taskId}] 分析创作者失败 ${creator.author_unique_id}:`, error);
           task.logs.push(`❌ ${creator.author_unique_id}: 分析失败 - ${error.message}`);
-          await saveTaskToFile(taskId, task);
+          saveTaskToFile(taskId, task);
           return null;
         }
       });
@@ -191,7 +191,7 @@ async function processFileAsync(taskId, fileContent, fileType) {
       // 批次间延迟，避免API限制
       if (i + batchSize < uniqueCreators.length) {
         task.logs.push('⏳ API调用间隔（避免限制）...');
-        await saveTaskToFile(taskId, task);
+        saveTaskToFile(taskId, task);
         await new Promise(resolve => setTimeout(resolve, 3000)); // 增加延迟
       }
     }
@@ -305,7 +305,7 @@ async function processFileAsync(taskId, fileContent, fileType) {
     task.logs.push('   • 真实视频指标计算');
     task.logs.push('   • 智能品牌关联判断');
 
-    await saveTaskToFile(taskId, task);
+    saveTaskToFile(taskId, task);
     console.log(`✅ [${taskId}] 任务完成: 处理了 ${results.length} 个创作者`);
 
   } catch (error) {
@@ -316,7 +316,7 @@ async function processFileAsync(taskId, fileContent, fileType) {
     if (error.stack) {
       task.logs.push(`   详细错误: ${error.stack.split('\n')[0]}`);
     }
-    await saveTaskToFile(taskId, task);
+    saveTaskToFile(taskId, task);
   }
 }
 
