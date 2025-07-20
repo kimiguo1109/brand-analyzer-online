@@ -333,32 +333,49 @@ const BrandAnalyzerDashboard = () => {
           // 映射后端数据结构到前端期望的格式
           const backendResults = data.results;
           if (backendResults) {
+            const total = backendResults.total_processed || 0;
+            const brandRelated = backendResults.brand_related_count || 0;
+            
+            // 计算各类型百分比
+            const officialPct = total > 0 ? Math.round((backendResults.official_brand_count / total) * 100) : 0;
+            const matrixPct = total > 0 ? Math.round((backendResults.matrix_account_count / total) * 100) : 0;
+            const ugcPct = total > 0 ? Math.round((backendResults.ugc_creator_count / total) * 100) : 0;
+            const nonBrandedPct = total > 0 ? Math.round((backendResults.non_branded_creator_count / total) * 100) : 0;
+            
+            // 在品牌相关账号中的比例
+            const brandInRelatedPct = brandRelated > 0 ? Math.round((backendResults.official_brand_count / brandRelated) * 100) : 0;
+            const matrixInRelatedPct = brandRelated > 0 ? Math.round((backendResults.matrix_account_count / brandRelated) * 100) : 0;
+            const ugcInRelatedPct = brandRelated > 0 ? Math.round((backendResults.ugc_creator_count / brandRelated) * 100) : 0;
+
             const mappedResults = {
-              total_processed: backendResults.total_processed || 0,
-              brand_related_count: backendResults.brand_related_count || 0,
+              total_processed: total,
+              brand_related_count: brandRelated,
               non_brand_count: backendResults.non_brand_count || 0,
               // 各类型在总创作者中的数量
-              official_account_count: backendResults.official_account_count || 0,
+              official_account_count: backendResults.official_brand_count || 0,
               matrix_account_count: backendResults.matrix_account_count || 0,
               ugc_creator_count: backendResults.ugc_creator_count || 0,
               non_branded_creator_count: backendResults.non_branded_creator_count || 0,
               // 各类型在总创作者中的百分比
-              official_account_percentage: backendResults.official_account_percentage || 0,
-              matrix_account_percentage: backendResults.matrix_account_percentage || 0,
-              ugc_creator_percentage: backendResults.ugc_creator_percentage || 0,
-              non_branded_creator_percentage: backendResults.non_branded_creator_percentage || 0,
+              official_account_percentage: officialPct,
+              matrix_account_percentage: matrixPct,
+              ugc_creator_percentage: ugcPct,
+              non_branded_creator_percentage: nonBrandedPct,
               // Brand Related Breakdown - 在品牌相关账号中的数量和百分比
-              brand_in_related: backendResults.brand_in_related || 0,
-              matrix_in_related: backendResults.matrix_in_related || 0,
-              ugc_in_related: backendResults.ugc_in_related || 0,
-              brand_in_related_percentage: backendResults.brand_in_related_percentage || 0,
-              matrix_in_related_percentage: backendResults.matrix_in_related_percentage || 0,
-              ugc_in_related_percentage: backendResults.ugc_in_related_percentage || 0,
-              brand_file: backendResults.brand_file,
-              non_brand_file: backendResults.non_brand_file
+              brand_in_related: backendResults.official_brand_count || 0,
+              matrix_in_related: backendResults.matrix_account_count || 0,
+              ugc_in_related: backendResults.ugc_creator_count || 0,
+              brand_in_related_percentage: brandInRelatedPct,
+              matrix_in_related_percentage: matrixInRelatedPct,
+              ugc_in_related_percentage: ugcInRelatedPct,
+              // 品牌分布信息
+              brand_distribution: backendResults.brand_distribution || {},
+              unique_brands_count: backendResults.unique_brands_count || 0,
+              brand_file: 'brand_related_creators.csv',
+              non_brand_file: 'non_brand_creators.csv'
             };
             setResults(mappedResults);
-            setDetailedResults(backendResults.detailed_results || []); // 存储详细结果
+            setDetailedResults(backendResults); // 存储完整的后端结果
           }
         } else if (data.status === 'error') {
           setError(data.progress || data.error || '分析过程中发生错误');
@@ -499,7 +516,7 @@ const BrandAnalyzerDashboard = () => {
 
   // 下载文件（使用前端生成）
   const handleDownload = async (fileType) => {
-    if (!detailedResults || detailedResults.length === 0) {
+    if (!detailedResults) {
       setError('没有可下载的分析结果，请先完成分析');
       return;
     }
@@ -508,16 +525,26 @@ const BrandAnalyzerDashboard = () => {
       let filteredResults = [];
       let filename = '';
 
+      // 使用新的数据结构
       if (fileType === 'brand_related' || fileType === 'brand') {
-        // 品牌相关：包含所有品牌相关的创作者
-        filteredResults = detailedResults.filter(r => r.is_brand);
+        // 品牌相关：包含所有品牌相关的创作者（官方品牌、矩阵账号、有品牌的UGC创作者）
+        filteredResults = detailedResults.brand_related_data || [];
         filename = 'brand_related_creators.csv';
       } else if (fileType === 'non_brand') {
         // 非品牌：没有品牌关联的创作者
-        filteredResults = detailedResults.filter(r => !r.is_brand);
+        filteredResults = detailedResults.non_brand_data || [];
         filename = 'non_brand_creators.csv';
+      } else if (fileType === 'all') {
+        // 所有数据
+        filteredResults = detailedResults.all_data || [];
+        filename = 'all_creators.csv';
       } else {
         setError('无效的文件类型');
+        return;
+      }
+
+      if (filteredResults.length === 0) {
+        setError('所选类型没有数据可下载');
         return;
       }
 
@@ -906,7 +933,52 @@ const BrandAnalyzerDashboard = () => {
                   <p className="text-xs text-gray-500">({results.ugc_in_related_percentage}% of brand related)</p>
                 </div>
               </div>
-                    </div>
+            </div>
+
+            {/* Brand Distribution */}
+            {results.brand_distribution && Object.keys(results.brand_distribution).length > 0 && (
+              <div className="bg-blue-50 rounded-lg p-4 mb-6">
+                <h3 className="text-lg font-medium mb-3 text-blue-800">
+                  🏷️ 发现的品牌 ({results.unique_brands_count} 个)
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {Object.entries(results.brand_distribution)
+                    .sort(([,a], [,b]) => (b.official + b.matrix + b.ugc) - (a.official + a.matrix + a.ugc))
+                    .slice(0, 12) // 显示前12个品牌
+                    .map(([brand, counts]) => {
+                      const total = counts.official + counts.matrix + counts.ugc;
+                      return (
+                        <div key={brand} className="bg-white rounded-md p-3 border border-blue-200">
+                          <p className="font-medium text-gray-800 text-sm mb-1">{brand}</p>
+                          <p className="text-xs text-gray-600 mb-2">{total} 个账号</p>
+                          <div className="flex flex-wrap gap-1 text-xs">
+                            {counts.official > 0 && (
+                              <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                                官方:{counts.official}
+                              </span>
+                            )}
+                            {counts.matrix > 0 && (
+                              <span className="bg-red-100 text-red-700 px-2 py-1 rounded">
+                                矩阵:{counts.matrix}
+                              </span>
+                            )}
+                            {counts.ugc > 0 && (
+                              <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded">
+                                UGC:{counts.ugc}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+                {Object.keys(results.brand_distribution).length > 12 && (
+                  <p className="text-xs text-blue-600 mt-3 text-center">
+                    还有 {Object.keys(results.brand_distribution).length - 12} 个品牌未显示...
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Distribution */}
             <div className="mb-6">
