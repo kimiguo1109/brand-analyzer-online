@@ -10,9 +10,6 @@ export const config = {
   maxDuration: 300,
 };
 
-// 全局任务存储
-global.analysisTasksCache = global.analysisTasksCache || new Map();
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -46,7 +43,7 @@ export default async function handler(req, res) {
     // 读取文件内容
     const fileContent = await fs.readFile(file.filepath, 'utf-8');
     
-    // 创建任务记录
+    // 创建任务记录 - 使用文件系统存储
     const task = {
       id: taskId,
       status: 'processing',
@@ -62,7 +59,8 @@ export default async function handler(req, res) {
       totalCount: 0
     };
 
-    global.analysisTasksCache.set(taskId, task);
+    // 保存任务到临时文件
+    await saveTaskToFile(taskId, task);
 
     // 清理临时文件
     try {
@@ -86,8 +84,30 @@ export default async function handler(req, res) {
   }
 }
 
+// 保存任务到文件系统
+async function saveTaskToFile(taskId, task) {
+  try {
+    const taskPath = `/tmp/task_${taskId}.json`;
+    await fs.writeFile(taskPath, JSON.stringify(task), 'utf-8');
+  } catch (error) {
+    console.error('Failed to save task:', error);
+  }
+}
+
+// 从文件系统加载任务
+async function loadTaskFromFile(taskId) {
+  try {
+    const taskPath = `/tmp/task_${taskId}.json`;
+    const content = await fs.readFile(taskPath, 'utf-8');
+    return JSON.parse(content);
+  } catch (error) {
+    console.error('Failed to load task:', error);
+    return null;
+  }
+}
+
 async function processFileAsync(taskId, fileContent, fileType) {
-  const task = global.analysisTasksCache.get(taskId);
+  const task = await loadTaskFromFile(taskId);
   if (!task) return;
 
   try {
@@ -107,11 +127,21 @@ async function processFileAsync(taskId, fileContent, fileType) {
     task.totalCount = uniqueCreators.length;
     task.logs.push(`去重后有 ${uniqueCreators.length} 个唯一创作者`);
     task.progress = 5;
-    global.analysisTasksCache.set(taskId, task);
+    await saveTaskToFile(taskId, task);
 
-    // 分析每个创作者
+    // 如果没有创作者，直接完成
+    if (uniqueCreators.length === 0) {
+      task.status = 'completed';
+      task.progress = 100;
+      task.results = generateStatistics([]);
+      task.logs.push('没有找到有效的创作者数据');
+      await saveTaskToFile(taskId, task);
+      return;
+    }
+
+    // 分析每个创作者 - 简化版本，每次处理3个
     const results = [];
-    const batchSize = 5; // 每批处理5个，减少并发压力
+    const batchSize = 3;
     
     for (let i = 0; i < uniqueCreators.length; i += batchSize) {
       const batch = uniqueCreators.slice(i, i + batchSize);
@@ -137,11 +167,11 @@ async function processFileAsync(taskId, fileContent, fileType) {
         task.progress = Math.max(5, Math.min(95, progress));
       });
       
-      global.analysisTasksCache.set(taskId, task);
+      await saveTaskToFile(taskId, task);
       
       // 批次间延迟，避免API限制
       if (i + batchSize < uniqueCreators.length) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
     }
 
@@ -154,14 +184,14 @@ async function processFileAsync(taskId, fileContent, fileType) {
     task.logs.push(`分析完成！共处理 ${results.length} 个创作者`);
     task.logs.push(`品牌相关: ${statistics.brand_related_count}, 非品牌: ${statistics.non_brand_count}`);
     
-    global.analysisTasksCache.set(taskId, task);
+    await saveTaskToFile(taskId, task);
 
   } catch (error) {
     console.error('Processing error:', error);
     task.status = 'error';
     task.error = error.message;
     task.logs.push(`处理出错: ${error.message}`);
-    global.analysisTasksCache.set(taskId, task);
+    await saveTaskToFile(taskId, task);
   }
 }
 
@@ -245,10 +275,10 @@ async function analyzeCreator(creator, taskId) {
     const userInfo = await getTikTokUserInfo(creator.author_unique_id);
     
     // 添加延迟避免API限制
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // 获取用户视频数据（简化版，减少API调用）
-    const videos = await getTikTokUserPosts(creator.author_unique_id, 5);
+    // 获取用户视频数据（减少调用次数）
+    const videos = await getTikTokUserPosts(creator.author_unique_id, 3);
     
     // 使用Gemini AI分析
     const analysis = await analyzeWithGemini(
@@ -332,7 +362,7 @@ async function getTikTokUserInfo(uniqueId) {
   };
 }
 
-async function getTikTokUserPosts(uniqueId, count = 5) {
+async function getTikTokUserPosts(uniqueId, count = 3) {
   const RAPIDAPI_KEY = '34ba1ae26fmsha15de959b0b5d6ep11e6e6jsn64ad77705138';
   
   try {
@@ -563,3 +593,6 @@ function generateStatistics(results) {
     detailed_results: results
   };
 }
+
+// 导出加载任务函数供其他API使用
+export { loadTaskFromFile, saveTaskToFile };
