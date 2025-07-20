@@ -162,7 +162,7 @@ const BrandAnalyzerDashboard = () => {
         
         if (data.status === 'completed' && data.results) {
           // 分析已完成，直接显示结果
-          setTaskId(data.analysis_id);
+          setTaskId(data.task_id);
           setStatus('completed');
           
           // 处理新的API响应格式
@@ -220,8 +220,12 @@ const BrandAnalyzerDashboard = () => {
         } else if (data.status === 'error') {
           setStatus('error');
           setError(data.error || '分析过程中发生错误');
+        } else if (data.status === 'processing') {
+          // 异步分析开始，设置任务ID并开始轮询
+          setTaskId(data.task_id);
+          setStatus('processing');
         } else {
-          // 这种情况在新的同步模式下不应该发生
+          // 处理其他状态
           setStatus('error');
           setError('意外的响应状态: ' + data.status);
         }
@@ -335,9 +339,120 @@ const BrandAnalyzerDashboard = () => {
     }
   };
 
-  // 轮询已移除，现在使用同步分析
+  // 轮询状态检查（仅在真实分析模式下）
+  useEffect(() => {
+    if (useMockData || !taskId || status === 'completed' || status === 'error') return;
 
-  // 日志轮询已移除，现在日志直接在上传时返回
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`/api/status?task_id=${taskId}`);
+        
+        if (response.status === 404) {
+          const errorData = await response.json();
+          console.warn('Task not found, stopping polling:', errorData);
+          setStatus('error');
+          setError(errorData.message || '分析任务已过期或被清理，请重新上传文件');
+          return;
+        }
+        
+        const data = await response.json();
+        setStatus(data.status);
+        
+        if (data.status === 'completed' && data.results) {
+          // 处理完成的结果
+          const analysisResults = data.results;
+          
+          // 计算统计数据
+          const brandRelated = analysisResults.brand_related_data || [];
+          const nonBrand = analysisResults.non_brand_data || [];
+          const totalProcessed = data.results.total_processed || 0;
+          
+          // 分类统计
+          const officialCount = brandRelated.filter(r => r.account_type === 'official account').length;
+          const matrixCount = brandRelated.filter(r => r.account_type === 'matrix account').length;
+          const ugcCount = brandRelated.filter(r => r.account_type === 'ugc creator').length;
+          const nonBrandedCount = nonBrand.length;
+          
+          const mappedResults = {
+            total_processed: totalProcessed,
+            brand_related_count: brandRelated.length,
+            non_brand_count: nonBrand.length,
+            
+            // 各类型统计
+            official_account_count: officialCount,
+            matrix_account_count: matrixCount,
+            ugc_creator_count: ugcCount,
+            non_branded_creator_count: nonBrandedCount,
+            
+            // 百分比
+            official_account_percentage: totalProcessed > 0 ? Math.round((officialCount / totalProcessed) * 100) : 0,
+            matrix_account_percentage: totalProcessed > 0 ? Math.round((matrixCount / totalProcessed) * 100) : 0,
+            ugc_creator_percentage: totalProcessed > 0 ? Math.round((ugcCount / totalProcessed) * 100) : 0,
+            non_branded_creator_percentage: totalProcessed > 0 ? Math.round((nonBrandedCount / totalProcessed) * 100) : 0,
+            
+            // Brand Related Breakdown
+            brand_in_related: officialCount,
+            matrix_in_related: matrixCount,
+            ugc_in_related: ugcCount,
+            brand_in_related_percentage: brandRelated.length > 0 ? Math.round((officialCount / brandRelated.length) * 100) : 0,
+            matrix_in_related_percentage: brandRelated.length > 0 ? Math.round((matrixCount / brandRelated.length) * 100) : 0,
+            ugc_in_related_percentage: brandRelated.length > 0 ? Math.round((ugcCount / brandRelated.length) * 100) : 0,
+            
+            // 品牌分布数据
+            brand_distribution: analysisResults.brand_distribution || {},
+            unique_brands_count: analysisResults.unique_brands_count || 0,
+            
+            brand_file: 'brand_related_creators.csv',
+            non_brand_file: 'non_brand_creators.csv'
+          };
+          
+          setResults(mappedResults);
+          setDetailedResults(analysisResults);
+        } else if (data.status === 'error') {
+          setError(data.error || '分析过程中发生错误');
+        }
+        
+      } catch (error) {
+        console.error('Status polling error:', error);
+        setError('无法获取分析状态，请刷新页面重试');
+      }
+    };
+
+    const interval = setInterval(pollStatus, 3000); // 3秒轮询一次
+    return () => clearInterval(interval);
+  }, [taskId, status, useMockData]);
+
+  // 获取日志（仅在真实分析模式下）
+  useEffect(() => {
+    if (useMockData || !taskId || status === 'completed' || status === 'error') return;
+
+    const fetchLogs = async () => {
+      try {
+        const response = await fetch(`/api/logs?task_id=${taskId}`);
+        
+        if (response.status === 404) {
+          console.warn('Task not found for logs, stopping log fetching');
+          return;
+        }
+        
+        const data = await response.json();
+        if (data.logs) {
+          const processedLogs = data.logs.map(log => {
+            if (typeof log === 'string') return log;
+            if (log && typeof log === 'object' && log.message) return log.message;
+            return log ? JSON.stringify(log) : '';
+          }).filter(log => log.trim());
+          
+          setLogs(processedLogs);
+        }
+      } catch (error) {
+        console.error('Fetch logs error:', error);
+      }
+    };
+
+    const interval = setInterval(fetchLogs, 2000); // 2秒获取一次日志
+    return () => clearInterval(interval);
+  }, [taskId, useMockData, status]);
 
   // 自动滚动日志到底部（分析进行中时滚动）
   useEffect(() => {

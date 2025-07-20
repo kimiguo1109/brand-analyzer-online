@@ -20,26 +20,61 @@ class BrandAnalyzer {
         this.model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
         this.apiCallCount = 0;
         this.lastApiCallTime = 0;
-        this.rateLimitDelay = 1000; // 1秒延迟
-        this.maxApiCallsPerMinute = 50;
+        this.rateLimitDelay = 8000; // 8秒延迟，确保每分钟不超过7次
+        this.maxApiCallsPerMinute = 7; // 远低于10次限制
+        this.retryCount = 0;
+        this.maxRetries = 3;
     }
 
-    // 防ban机制
+    // 防ban机制 - 严格控制API调用频率
     async waitForRateLimit() {
         const currentTime = Date.now();
         
+        // 强制最小间隔8秒
         if (currentTime - this.lastApiCallTime < this.rateLimitDelay) {
             const waitTime = this.rateLimitDelay - (currentTime - this.lastApiCallTime);
+            console.log(`⏳ API限频等待 ${Math.round(waitTime/1000)} 秒...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
         
         this.apiCallCount++;
         this.lastApiCallTime = Date.now();
         
-        // 每50次调用休息5秒
+        // 每7次调用休息20秒，确保不会超过配额
         if (this.apiCallCount % this.maxApiCallsPerMinute === 0) {
-            console.log(`已调用API ${this.apiCallCount} 次，休息5秒防止被ban`);
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            console.log(`🛑 已调用API ${this.apiCallCount} 次，休息20秒防止配额超限`);
+            await new Promise(resolve => setTimeout(resolve, 20000));
+        }
+        
+        console.log(`📊 API调用计数: ${this.apiCallCount}`);
+    }
+
+    // 带重试的API调用
+    async callGeminiWithRetry(prompt, uniqueId, retryCount = 0) {
+        try {
+            await this.waitForRateLimit();
+            
+            const result = await this.model.generateContent(prompt);
+            const response = await result.response;
+            return response.text();
+            
+        } catch (error) {
+            console.error(`Gemini API error for ${uniqueId} (attempt ${retryCount + 1}/${this.maxRetries}):`, error.message);
+            
+            // 如果是配额错误且还有重试次数，等待更长时间后重试
+            if (error.message.includes('429') || error.message.includes('quota') || error.message.includes('Too Many Requests')) {
+                if (retryCount < this.maxRetries - 1) {
+                    const backoffDelay = Math.min(30000 * Math.pow(2, retryCount), 120000); // 指数退避，最多2分钟
+                    console.log(`⏰ 配额限制，等待 ${backoffDelay/1000} 秒后重试...`);
+                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                    return this.callGeminiWithRetry(prompt, uniqueId, retryCount + 1);
+                } else {
+                    console.error(`❌ ${uniqueId} 达到最大重试次数，跳过此创作者`);
+                    return null;
+                }
+            } else {
+                throw error; // 非配额错误直接抛出
+            }
         }
     }
 
@@ -321,11 +356,13 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
         
         while (retryCount < maxRetries) {
             try {
-                await this.waitForRateLimit();
+                const text = await this.callGeminiWithRetry(prompt, uniqueId, retryCount);
                 
-                const result = await this.model.generateContent(prompt);
-                const response = await result.response;
-                const text = response.text();
+                if (!text) {
+                    // API调用失败，使用规则备用方案
+                    console.log(`⚠️ ${uniqueId} API调用失败，使用规则备用分析`);
+                    return this.analyzeCreatorWithRules(signature, nickname, uniqueId, context, userInfo);
+                }
                 
                 if (text) {
                     const parts = text.split('|').map(p => p.trim());

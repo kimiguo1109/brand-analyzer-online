@@ -1,27 +1,13 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+// 使用内存存储（与upload.js共享）
+global.analysisCache = global.analysisCache || new Map();
 
-// 任务状态文件存储路径
-const TASKS_DIR = '/tmp/tasks';
-
-// 确保任务目录存在
-async function ensureTasksDir() {
+// 从内存加载任务
+function loadTaskFromMemory(taskId) {
   try {
-    await fs.mkdir(TASKS_DIR, { recursive: true });
+    const task = global.analysisCache.get(taskId);
+    return task ? JSON.parse(JSON.stringify(task)) : null; // 深拷贝
   } catch (error) {
-    // 目录可能已存在，忽略错误
-  }
-}
-
-// 从文件系统加载任务
-async function loadTaskFromFile(taskId) {
-  try {
-    await ensureTasksDir();
-    const taskPath = path.join(TASKS_DIR, `${taskId}.json`);
-    const taskData = await fs.readFile(taskPath, 'utf-8');
-    return JSON.parse(taskData);
-  } catch (error) {
-    console.error('Failed to load task from file:', error);
+    console.error('Failed to load task from memory:', error);
     return null;
   }
 }
@@ -37,7 +23,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID is required' });
   }
 
-  const task = await loadTaskFromFile(task_id);
+  const task = loadTaskFromMemory(task_id);
 
   if (!task) {
     return res.status(404).json({ 
