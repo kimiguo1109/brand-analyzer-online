@@ -110,6 +110,7 @@ export default async function handler(req, res) {
       // 存储到全局内存
       global.analysisCache = global.analysisCache || new Map();
       global.analysisCache.set(analysisId, task);
+      console.log(`[Upload] 创建任务 ${analysisId}，缓存大小: ${global.analysisCache.size}`);
       
       // 异步处理
       performAsyncAnalysis(uniqueCreators, analysisId);
@@ -169,6 +170,9 @@ async function performAsyncAnalysis(uniqueCreators, analysisId) {
     if (task) {
       Object.assign(task, updates, { lastUpdated: new Date().toISOString() });
       global.analysisCache.set(analysisId, task);
+      console.log(`[Upload] 更新任务 ${analysisId}，进度: ${updates.progress || task.progress}%，状态: ${updates.status || task.status}`);
+    } else {
+      console.error(`[Upload] 无法更新任务 ${analysisId} - 任务不在缓存中`);
     }
   };
 

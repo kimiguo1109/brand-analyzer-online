@@ -363,6 +363,16 @@ const BrandAnalyzerDashboard = () => {
         const data = await response.json();
         setStatus(data.status);
         
+        // 更新日志信息
+        if (data.logs && data.logs.length > 0) {
+          const processedLogs = data.logs.map(log => {
+            if (typeof log === 'string') return log;
+            if (log && typeof log === 'object' && log.message) return log.message;
+            return log ? JSON.stringify(log) : '';
+          }).filter(log => log.trim());
+          setLogs(processedLogs);
+        }
+        
         if (data.status === 'completed' && data.results) {
           // 处理完成的结果
           const analysisResults = data.results;
@@ -427,37 +437,7 @@ const BrandAnalyzerDashboard = () => {
     return () => clearInterval(interval);
   }, [taskId, status, useMockData]);
 
-  // 获取日志（仅在真实分析模式下）
-  useEffect(() => {
-    if (useMockData || !taskId || status === 'completed' || status === 'error') return;
-
-    const fetchLogs = async () => {
-      try {
-        const response = await fetch(`/api/logs?task_id=${taskId}`);
-        
-        if (response.status === 404) {
-          console.warn('Task not found for logs, stopping log fetching');
-          return;
-        }
-        
-        const data = await response.json();
-        if (data.logs) {
-          const processedLogs = data.logs.map(log => {
-            if (typeof log === 'string') return log;
-            if (log && typeof log === 'object' && log.message) return log.message;
-            return log ? JSON.stringify(log) : '';
-          }).filter(log => log.trim());
-          
-          setLogs(processedLogs);
-        }
-      } catch (error) {
-        console.error('Fetch logs error:', error);
-      }
-    };
-
-    const interval = setInterval(fetchLogs, 2000); // 2秒获取一次日志
-    return () => clearInterval(interval);
-  }, [taskId, useMockData, status]);
+  // 日志已合并到status API中，无需单独轮询
 
   // 自动滚动日志到底部（分析进行中时滚动）
   useEffect(() => {

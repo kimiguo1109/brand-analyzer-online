@@ -4,8 +4,17 @@ global.analysisCache = global.analysisCache || new Map();
 // 从内存加载任务
 function loadTaskFromMemory(taskId) {
   try {
+    console.log(`[Status] 查找任务 ${taskId}，当前缓存大小: ${global.analysisCache.size}`);
+    console.log(`[Status] 缓存中的任务IDs: ${Array.from(global.analysisCache.keys()).join(', ')}`);
+    
     const task = global.analysisCache.get(taskId);
-    return task ? JSON.parse(JSON.stringify(task)) : null; // 深拷贝
+    if (task) {
+      console.log(`[Status] 找到任务 ${taskId}，状态: ${task.status}`);
+      return JSON.parse(JSON.stringify(task)); // 深拷贝
+    } else {
+      console.log(`[Status] 任务 ${taskId} 不在缓存中`);
+      return null;
+    }
   } catch (error) {
     console.error('Failed to load task from memory:', error);
     return null;
@@ -41,7 +50,8 @@ export default async function handler(req, res) {
     progress: task.progress || 0,
     created_at: task.createdAt,
     processed_count: task.processedCount || 0,
-    total_count: task.totalCount || 0
+    total_count: task.totalCount || 0,
+    logs: task.logs || [] // 直接包含日志信息
   };
 
   // 如果任务完成，包含结果
