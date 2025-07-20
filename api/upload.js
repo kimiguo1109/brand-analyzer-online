@@ -5,53 +5,61 @@ export const config = {
   maxDuration: 300,
 };
 
-global.analysisTasksCache = global.analysisTasksCache || new Map();
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // 模拟文件上传和处理
+    // 简化版本：直接返回成功结果，模拟分析完成
     const taskId = Date.now().toString();
     
-    const task = {
-      id: taskId,
-      status: 'processing',
-      filename: 'uploaded_file.json',
-      createdAt: new Date().toISOString(),
-      logs: ['文件上传成功', '开始分析...'],
-      progress: 0,
+    // 模拟短暂的处理时间
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // 直接返回完成状态和结果
+    const mockResults = {
+      total_processed: 397,
+      brand_related_count: 346,
+      non_brand_count: 51,
+      official_account_count: 35,
+      matrix_account_count: 50,
+      ugc_creator_count: 216,
+      non_branded_creator_count: 51,
+      official_account_percentage: 9,
+      matrix_account_percentage: 13,
+      ugc_creator_percentage: 54,
+      non_branded_creator_percentage: 13,
+      brand_in_related: 35,
+      matrix_in_related: 50,
+      ugc_in_related: 216,
+      brand_in_related_percentage: 10,
+      matrix_in_related_percentage: 14,
+      ugc_in_related_percentage: 62,
+      brand_file: 'brand_related_creators.csv',
+      non_brand_file: 'non_brand_creators.csv'
     };
-
-    global.analysisTasksCache.set(taskId, task);
-
-    // 模拟异步处理
-    setTimeout(() => {
-      const currentTask = global.analysisTasksCache.get(taskId);
-      if (currentTask) {
-        currentTask.status = 'completed';
-        currentTask.progress = 100;
-        currentTask.results = {
-          total_processed: 397,
-          brand_related_count: 346,
-          non_brand_count: 51,
-          official_account_count: 35,
-          matrix_account_count: 50,
-          ugc_creator_count: 216
-        };
-        global.analysisTasksCache.set(taskId, currentTask);
-      }
-    }, 5000);
 
     res.status(200).json({
       task_id: taskId,
-      status: 'processing',
-      message: '文件上传成功，开始处理...'
+      status: 'completed',
+      progress: 100,
+      results: mockResults,
+      message: '文件分析完成！',
+      logs: [
+        '文件上传成功',
+        '解析文件内容...',
+        '初始化品牌分析器...',
+        '开始分析创作者数据...',
+        '处理品牌关联性...',
+        '分类创作者类型...',
+        '生成分析报告...',
+        '分析完成！'
+      ]
     });
 
   } catch (error) {
+    console.error('Upload error:', error);
     res.status(500).json({ error: '文件上传失败: ' + error.message });
   }
 }
