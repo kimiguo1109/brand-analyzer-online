@@ -157,8 +157,8 @@ function extractUniqueCreators(data) {
   
   for (const item of data) {
     // 尝试不同的字段名来获取创作者信息
-    const creatorFields = ['unique_id', 'uniqueId', 'creator_id', 'username', 'author', 'creator'];
-    const displayFields = ['display_name', 'displayName', 'nickname', 'name'];
+    const creatorFields = ['user_unique_id', 'unique_id', 'uniqueId', 'author_unique_id', 'creator_id', 'username', 'author', 'creator'];
+    const displayFields = ['user_nickname', 'display_name', 'displayName', 'author_nickname', 'nickname', 'name'];
     
     let uniqueId = null;
     let displayName = null;
