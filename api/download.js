@@ -1,29 +1,19 @@
 import { promises as fs } from 'fs';
 
-// 从文件系统加载任务
-async function loadTaskFromFile(taskId) {
-  try {
-    const taskPath = `/tmp/task_${taskId}.json`;
-    const content = await fs.readFile(taskPath, 'utf-8');
-    return JSON.parse(content);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      console.log(`Task file not found for download request, task ID: ${taskId}`);
-      return null;
-    }
-    console.error('Failed to load task for download:', error);
-    return null;
-  }
-}
+// 使用内存存储，确保访问全局任务存储
+global.tasks = global.tasks || new Map();
 
-// 检查任务文件是否存在
-async function taskExists(taskId) {
+// 从内存加载任务
+function loadTaskFromMemory(taskId) {
   try {
-    const taskPath = `/tmp/task_${taskId}.json`;
-    await fs.access(taskPath);
-    return true;
+    const task = global.tasks.get(taskId);
+    if (task) {
+      return JSON.parse(JSON.stringify(task)); // 深拷贝
+    }
+    return null;
   } catch (error) {
-    return false;
+    console.error('Failed to load task from memory:', error);
+    return null;
   }
 }
 
@@ -38,19 +28,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID and file type are required' });
   }
 
-  // 检查任务是否存在
-  const exists = await taskExists(task_id);
-  if (!exists) {
-    return res.status(404).json({ 
-      error: 'Task not found or expired',
-      message: '分析任务已过期或被清理，无法下载文件',
-      code: 'TASK_NOT_FOUND',
-      suggestion: '请重新运行分析以生成新的下载文件。'
-    });
-  }
-
-  // 从文件系统获取任务信息
-  const task = await loadTaskFromFile(task_id);
+  // 从内存获取任务信息
+  const task = loadTaskFromMemory(task_id);
 
   if (!task) {
     return res.status(404).json({ 
@@ -81,28 +60,20 @@ export default async function handler(req, res) {
   let filteredResults = [];
   let filename = '';
 
-  if (file_type === 'brand') {
-    // 品牌相关：包含官方品牌、矩阵账号、有品牌名的UGC创作者
-    filteredResults = allResults.filter(r => 
-      r.is_brand || 
-      r.is_matrix_account || 
-      (r.extracted_brand_name && r.extracted_brand_name.trim())
-    );
+  if (file_type === 'brand_related' || file_type === 'brand') {
+    // 品牌相关：包含所有品牌相关的创作者
+    filteredResults = allResults.filter(r => r.is_brand);
     filename = 'brand_related_creators.csv';
   } else if (file_type === 'non_brand') {
     // 非品牌：没有品牌关联的创作者
-    filteredResults = allResults.filter(r => 
-      !r.is_brand && 
-      !r.is_matrix_account && 
-      (!r.extracted_brand_name || !r.extracted_brand_name.trim())
-    );
+    filteredResults = allResults.filter(r => !r.is_brand);
     filename = 'non_brand_creators.csv';
   } else if (file_type === 'all') {
     // 全部结果
     filteredResults = allResults;
     filename = 'all_creators_analysis.csv';
   } else {
-    return res.status(400).json({ error: 'Invalid file type. Use: brand, non_brand, or all' });
+    return res.status(400).json({ error: 'Invalid file type. Use: brand_related, non_brand, or all' });
   }
 
   // 生成CSV内容
@@ -119,25 +90,13 @@ export default async function handler(req, res) {
 function generateCSVContent(results) {
   // CSV字段定义
   const fieldnames = [
-    'video_id',
     'author_unique_id', 
-    'author_link',
     'signature',
-    'account_type',
-    'brand',
-    'email',
-    'recent_posts_views_avg',
-    'recent_posts_like_avg', 
-    'recent_posts_share_avg',
-    'posting_frequency',
-    'stability_score',
-    'brand_confidence',
-    'analysis_details',
+    'is_brand',
+    'brand_name',
     'author_followers_count',
-    'author_followings_count',
-    'videoCount',
-    'author_avatar',
-    'create_times'
+    'account_type',
+    'confidence_score'
   ];
 
   // 生成CSV头部
@@ -145,35 +104,15 @@ function generateCSVContent(results) {
 
   // 生成数据行
   results.forEach(result => {
-    // 确定账户类型
-    let accountType = 'ugc creator';
-    if (result.is_brand) {
-      accountType = 'official account';
-    } else if (result.is_matrix_account) {
-      accountType = 'matrix account';
-    }
-
     // 清理和转义数据
     const row = [
-      escapeCSVField(result.video_id || ''),
       escapeCSVField(result.author_unique_id || ''),
-      escapeCSVField(result.author_link || ''),
       escapeCSVField(result.signature || ''),
-      escapeCSVField(accountType),
-      escapeCSVField(result.extracted_brand_name || ''),
-      escapeCSVField(result.email || ''),
-      result.recent_posts_views_avg || 0,
-      result.recent_posts_like_avg || 0,
-      result.recent_posts_share_avg || 0,
-      result.posting_frequency || 0,
-      result.stability_score || 0,
-      result.brand_confidence || 0,
-      escapeCSVField(result.analysis_details || ''),
+      result.is_brand ? 'true' : 'false',
+      escapeCSVField(result.brand_name || ''),
       result.author_followers_count || 0,
-      result.author_followings_count || 0,
-      result.videoCount || 0,
-      escapeCSVField(result.author_avatar || ''),
-      escapeCSVField(result.create_times || '')
+      escapeCSVField(result.account_type || 'ugc_creator'),
+      result.confidence_score || 0
     ];
 
     csvContent += row.join(',') + '\n';

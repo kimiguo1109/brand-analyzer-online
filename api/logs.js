@@ -1,29 +1,17 @@
-import { promises as fs } from 'fs';
+// 使用内存存储，确保访问全局任务存储
+global.tasks = global.tasks || new Map();
 
-// 从文件系统加载任务
-async function loadTaskFromFile(taskId) {
+// 从内存加载任务
+function loadTaskFromMemory(taskId) {
   try {
-    const taskPath = `/tmp/task_${taskId}.json`;
-    const content = await fs.readFile(taskPath, 'utf-8');
-    return JSON.parse(content);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      console.log(`Task file not found for logs request, task ID: ${taskId}`);
-      return null;
+    const task = global.tasks.get(taskId);
+    if (task) {
+      return JSON.parse(JSON.stringify(task)); // 深拷贝
     }
-    console.error('Failed to load task for logs:', error);
     return null;
-  }
-}
-
-// 检查任务文件是否存在
-async function taskExists(taskId) {
-  try {
-    const taskPath = `/tmp/task_${taskId}.json`;
-    await fs.access(taskPath);
-    return true;
   } catch (error) {
-    return false;
+    console.error('Failed to load task from memory:', error);
+    return null;
   }
 }
 
@@ -38,17 +26,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID is required' });
   }
 
-  // 检查任务是否存在
-  const exists = await taskExists(task_id);
-  if (!exists) {
-    return res.status(404).json({ 
-      error: 'Task not found',
-      message: '任务已过期或被清理',
-      code: 'TASK_NOT_FOUND'
-    });
-  }
-
-  const task = await loadTaskFromFile(task_id);
+  const task = loadTaskFromMemory(task_id);
 
   if (!task) {
     return res.status(404).json({ 
