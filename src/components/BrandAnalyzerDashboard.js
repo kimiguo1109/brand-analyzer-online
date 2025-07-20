@@ -161,7 +161,7 @@ const BrandAnalyzerDashboard = () => {
         const data = await response.json();
         
         if (data.status === 'completed' && data.results) {
-          // 分析已完成，直接显示结果
+          // 小文件同步分析已完成，直接显示结果
           setTaskId(data.task_id);
           setStatus('completed');
           
@@ -215,15 +215,20 @@ const BrandAnalyzerDashboard = () => {
           
           setResults(mappedResults);
           setDetailedResults(analysisResults); // 存储完整的分析结果对象，包含分类数据
-          setLogs(data.analysis_logs || ['文件上传成功', '分析完成']);
+          setLogs(data.analysis_logs || ['文件上传成功', '小文件快速分析完成']);
           
         } else if (data.status === 'error') {
           setStatus('error');
           setError(data.error || '分析过程中发生错误');
         } else if (data.status === 'processing') {
-          // 异步分析开始，设置任务ID并开始轮询
+          // 大文件异步分析开始，设置任务ID并开始轮询
           setTaskId(data.task_id);
           setStatus('processing');
+          setLogs([
+            '📁 文件上传成功',
+            `📊 大文件模式: ${data.total_count || '多个'} 创作者`,
+            '🔄 正在异步处理，请稍候...'
+          ]);
         } else {
           // 处理其他状态
           setStatus('error');

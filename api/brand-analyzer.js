@@ -20,30 +20,30 @@ class BrandAnalyzer {
         this.model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
         this.apiCallCount = 0;
         this.lastApiCallTime = 0;
-        this.rateLimitDelay = 8000; // 8秒延迟，确保每分钟不超过7次
-        this.maxApiCallsPerMinute = 7; // 远低于10次限制
+        this.rateLimitDelay = 2000; // 2秒延迟，平衡效率和稳定性
+        this.maxApiCallsPerMinute = 20; // 合理的限制，依赖重试处理429
         this.retryCount = 0;
         this.maxRetries = 3;
     }
 
-    // 防ban机制 - 严格控制API调用频率
+    // 优化的频率控制 - 平衡效率和稳定性
     async waitForRateLimit() {
         const currentTime = Date.now();
         
-        // 强制最小间隔8秒
+        // 基础间隔控制
         if (currentTime - this.lastApiCallTime < this.rateLimitDelay) {
             const waitTime = this.rateLimitDelay - (currentTime - this.lastApiCallTime);
-            console.log(`⏳ API限频等待 ${Math.round(waitTime/1000)} 秒...`);
+            console.log(`⏳ API间隔等待 ${Math.round(waitTime/1000)} 秒...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
         
         this.apiCallCount++;
         this.lastApiCallTime = Date.now();
         
-        // 每7次调用休息20秒，确保不会超过配额
+        // 每20次调用短暂休息，避免突发请求
         if (this.apiCallCount % this.maxApiCallsPerMinute === 0) {
-            console.log(`🛑 已调用API ${this.apiCallCount} 次，休息20秒防止配额超限`);
-            await new Promise(resolve => setTimeout(resolve, 20000));
+            console.log(`⏸️ 已调用API ${this.apiCallCount} 次，短暂休息5秒`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
         }
         
         console.log(`📊 API调用计数: ${this.apiCallCount}`);
@@ -721,7 +721,7 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
     // 批量分析创作者
     async analyzeCreators(creators, progressCallback = null) {
         const results = [];
-        const batchSize = 3; // 批处理大小，避免API限制
+        const batchSize = 5; // 优化的批处理大小，提高并发效率
         
         console.log(`🚀 开始批量分析 ${creators.length} 个创作者`);
         
@@ -766,10 +766,10 @@ Format: True|False|False|BrandName|0.9|Brief explanation`;
             
             console.log(`📊 批次 ${batchNum} 完成，成功: ${validResults.length}/${batch.length}`);
             
-            // 批次间延迟，避免API限制
+            // 批次间短暂延迟
             if (i + batchSize < creators.length) {
-                console.log('⏳ API调用间隔...');
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                console.log('⏳ 批次间隔...');
+                await new Promise(resolve => setTimeout(resolve, 1500)); // 减少到1.5秒
             }
         }
         

@@ -52,38 +52,76 @@ export default async function handler(req, res) {
       console.error('Failed to delete temp file:', error);
     }
 
-    // 创建任务记录（用于进度追踪）
-    const task = {
-      id: analysisId,
-      status: 'processing',
-      filename: file.originalFilename,
-      fileType: ext,
-      createdAt: new Date().toISOString(),
-      progress: 0,
-      logs: [
-        '📁 文件上传成功', 
-        '🚀 启动品牌分析系统',
-        '🤖 集成 Gemini AI + TikHub API',
-        '⚡ 开始解析文件...'
-      ],
-      processedCount: 0,
-      totalCount: 0
-    };
+        console.log(`开始分析文件: ${file.originalFilename} (ID: ${analysisId})`);
     
-    // 存储到全局内存（用于短期进度追踪）
-    global.analysisCache = global.analysisCache || new Map();
-    global.analysisCache.set(analysisId, task);
+    // 预处理：检查文件大小决定处理策略  
+    let creatorsData = [];
+    if (ext === '.csv') {
+      creatorsData = await parseCSV(fileContent);
+    } else {
+      creatorsData = JSON.parse(fileContent);
+    }
     
-    // 异步开始分析，立即返回任务ID
-    console.log(`开始异步分析文件: ${file.originalFilename} (ID: ${analysisId})`);
-    performAnalysisAsync(fileContent, ext, analysisId);
+    const uniqueCreators = extractUniqueCreators(creatorsData);
+    console.log(`提取到 ${uniqueCreators.length} 个创作者`);
     
-    // 立即返回任务ID，让前端开始轮询
-    res.status(200).json({
-      task_id: analysisId,
-      status: 'processing',
-      message: '文件上传成功，正在进行品牌分析...'
-    });
+    // 小文件直接同步处理，大文件异步处理  
+    if (uniqueCreators.length <= 15) {
+      console.log(`📦 小文件模式: ${uniqueCreators.length} 个创作者，直接同步分析`);
+      
+      try {
+        const analysisResult = await performSyncAnalysis(uniqueCreators, analysisId);
+        
+        // 直接返回完整结果
+        res.status(200).json({
+          task_id: analysisId,
+          status: 'completed',
+          filename: file.originalFilename,
+          ...analysisResult
+        });
+      } catch (error) {
+        console.error(`同步分析失败:`, error);
+        res.status(500).json({
+          error: '分析失败: ' + error.message,
+          status: 'error'
+        });
+      }
+      
+    } else {
+      console.log(`📊 大文件模式: ${uniqueCreators.length} 个创作者，异步处理`);
+      
+      // 创建任务记录
+      const task = {
+        id: analysisId,
+        status: 'processing',
+        filename: file.originalFilename,
+        createdAt: new Date().toISOString(),
+        progress: 0,
+        logs: [
+          '📁 文件上传成功', 
+          '🚀 启动品牌分析系统',
+          `👥 发现 ${uniqueCreators.length} 个创作者`,
+          '🤖 开始智能品牌分析...'
+        ],
+        processedCount: 0,
+        totalCount: uniqueCreators.length
+      };
+      
+      // 存储到全局内存
+      global.analysisCache = global.analysisCache || new Map();
+      global.analysisCache.set(analysisId, task);
+      
+      // 异步处理
+      performAsyncAnalysis(uniqueCreators, analysisId);
+      
+      // 立即返回任务ID
+      res.status(200).json({
+        task_id: analysisId,
+        status: 'processing',
+        message: `文件上传成功，正在分析 ${uniqueCreators.length} 个创作者...`,
+        total_count: uniqueCreators.length
+      });
+    }
 
   } catch (error) {
     console.error('Upload error:', error);
@@ -94,9 +132,39 @@ export default async function handler(req, res) {
   }
 }
 
-// 异步执行分析过程（带进度更新）
-async function performAnalysisAsync(fileContent, fileType, analysisId) {
-  const updateTaskStatus = (updates) => {
+// 同步分析（小文件）
+async function performSyncAnalysis(uniqueCreators, analysisId) {
+  try {
+    console.log(`[${analysisId}] 开始同步分析 ${uniqueCreators.length} 个创作者`);
+    
+    const analyzer = new BrandAnalyzer();
+    const analysisResults = await analyzer.analyzeCreators(uniqueCreators, (progress, message) => {
+      console.log(`[${analysisId}] ${message} (${progress}%)`);
+    });
+    
+    console.log(`[${analysisId}] 同步分析完成!`);
+    
+    return {
+      results: analysisResults,
+      total_processed: uniqueCreators.length,
+      analysis_logs: [
+        '📁 文件上传成功',
+        '🚀 启动品牌分析系统', 
+        `👥 提取到 ${uniqueCreators.length} 个创作者`,
+        '🤖 智能品牌分析完成',
+        '✅ 分析完成!'
+      ]
+    };
+    
+  } catch (error) {
+    console.error(`[${analysisId}] 同步分析失败:`, error);
+    throw error;
+  }
+}
+
+// 异步分析（大文件，带进度更新）  
+async function performAsyncAnalysis(uniqueCreators, analysisId) {
+    const updateTaskStatus = (updates) => {
     const task = global.analysisCache.get(analysisId);
     if (task) {
       Object.assign(task, updates, { lastUpdated: new Date().toISOString() });
@@ -105,60 +173,23 @@ async function performAnalysisAsync(fileContent, fileType, analysisId) {
   };
 
   try {
-    console.log(`[${analysisId}] 开始解析文件数据...`);
+    console.log(`[${analysisId}] 开始异步分析 ${uniqueCreators.length} 个创作者`);
     updateTaskStatus({ 
-      logs: [...global.analysisCache.get(analysisId).logs, '📊 解析文件数据...'],
+      logs: [...global.analysisCache.get(analysisId).logs, '🔄 初始化分析引擎...'],
       progress: 10 
     });
-    
-    // 解析文件内容
-    let creatorsData = [];
-    
-    if (fileType === '.csv') {
-      creatorsData = await parseCSV(fileContent);
-      console.log(`[${analysisId}] CSV文件解析完成，发现 ${creatorsData.length} 行数据`);
-      updateTaskStatus({ 
-        logs: [...global.analysisCache.get(analysisId).logs, `📋 CSV文件解析完成，发现 ${creatorsData.length} 行数据`],
-        progress: 20 
-      });
-    } else {
-      creatorsData = JSON.parse(fileContent);
-      console.log(`[${analysisId}] JSON文件解析完成，发现 ${creatorsData.length} 个数据项`);
-      updateTaskStatus({ 
-        logs: [...global.analysisCache.get(analysisId).logs, `📋 JSON文件解析完成，发现 ${creatorsData.length} 个数据项`],
-        progress: 20 
-      });
-    }
-
-    if (creatorsData.length === 0) {
-      throw new Error('文件中没有找到有效的创作者数据');
-    }
-
-    // 提取唯一创作者
-    const uniqueCreators = extractUniqueCreators(creatorsData);
-    console.log(`[${analysisId}] 提取到 ${uniqueCreators.length} 个唯一创作者`);
-    updateTaskStatus({ 
-      logs: [...global.analysisCache.get(analysisId).logs, `👥 提取到 ${uniqueCreators.length} 个唯一创作者`],
-      progress: 30,
-      totalCount: uniqueCreators.length
-    });
-
-    if (uniqueCreators.length === 0) {
-      throw new Error('没有找到有效的创作者信息');
-    }
 
     // 初始化品牌分析器
     const analyzer = new BrandAnalyzer();
-    console.log(`[${analysisId}] 开始品牌关联分析...`);
     updateTaskStatus({ 
-      logs: [...global.analysisCache.get(analysisId).logs, '🔍 开始品牌关联分析...'],
-      progress: 35
+      logs: [...global.analysisCache.get(analysisId).logs, '🔍 开始智能品牌分析...'],
+      progress: 20
     });
     
     // 分析创作者品牌关联（带进度回调）
     const analysisResults = await analyzer.analyzeCreators(uniqueCreators, (progress, message) => {
       console.log(`[${analysisId}] ${message} (${progress}%)`);
-      const adjustedProgress = 35 + (progress * 0.6); // 35-95%范围
+      const adjustedProgress = 20 + (progress * 0.75); // 20-95%范围
       updateTaskStatus({ 
         logs: [...global.analysisCache.get(analysisId).logs, `🤖 ${message}`],
         progress: Math.round(adjustedProgress),
@@ -166,7 +197,7 @@ async function performAnalysisAsync(fileContent, fileType, analysisId) {
       });
     });
 
-    console.log(`[${analysisId}] 分析完成!`);
+    console.log(`[${analysisId}] 异步分析完成!`);
     
     // 更新为完成状态
     const finalResults = {
@@ -178,10 +209,10 @@ async function performAnalysisAsync(fileContent, fileType, analysisId) {
       status: 'completed',
       progress: 100,
       results: finalResults,
-      logs: [...global.analysisCache.get(analysisId).logs, '✅ 分析完成!']
+      logs: [...global.analysisCache.get(analysisId).logs, '🎉 大文件分析完成!', `📊 成功分析了 ${uniqueCreators.length} 个创作者`]
     });
     
-    console.log(`✅ [${analysisId}] 任务完成: 处理了 ${uniqueCreators.length} 个创作者`);
+    console.log(`✅ [${analysisId}] 异步任务完成: 处理了 ${uniqueCreators.length} 个创作者`);
 
   } catch (error) {
     console.error(`[${analysisId}] 分析失败:`, error);
@@ -217,7 +248,7 @@ function parseCSV(csvContent) {
 // 提取唯一创作者函数
 function extractUniqueCreators(data) {
   const uniqueCreatorsMap = new Map();
-  
+
   for (const item of data) {
     // 尝试不同的字段名来获取创作者信息
     const creatorFields = ['user_unique_id', 'unique_id', 'uniqueId', 'author_unique_id', 'creator_id', 'username', 'author', 'creator'];
@@ -254,6 +285,6 @@ function extractUniqueCreators(data) {
       });
     }
   }
-  
+
   return Array.from(uniqueCreatorsMap.values());
 } 
