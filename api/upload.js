@@ -51,6 +51,7 @@ export default async function handler(req, res) {
       fileType: ext,
       fileContent: fileContent,
       createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
       logs: ['文件上传成功', '开始解析文件...'],
       progress: 0,
       results: null,

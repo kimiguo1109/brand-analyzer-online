@@ -7,8 +7,23 @@ async function loadTaskFromFile(taskId) {
     const content = await fs.readFile(taskPath, 'utf-8');
     return JSON.parse(content);
   } catch (error) {
-    console.error('Failed to load task:', error);
+    if (error.code === 'ENOENT') {
+      console.log(`Task file not found for logs request, task ID: ${taskId}`);
+      return null;
+    }
+    console.error('Failed to load task for logs:', error);
     return null;
+  }
+}
+
+// 检查任务文件是否存在
+async function taskExists(taskId) {
+  try {
+    const taskPath = `/tmp/task_${taskId}.json`;
+    await fs.access(taskPath);
+    return true;
+  } catch (error) {
+    return false;
   }
 }
 
@@ -23,19 +38,28 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID is required' });
   }
 
-  // 从文件系统获取任务日志
+  // 检查任务是否存在
+  const exists = await taskExists(task_id);
+  if (!exists) {
+    return res.status(404).json({ 
+      error: 'Task not found',
+      message: '任务已过期或被清理',
+      code: 'TASK_NOT_FOUND'
+    });
+  }
+
   const task = await loadTaskFromFile(task_id);
 
   if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
+    return res.status(404).json({ 
+      error: 'Task data corrupted',
+      message: '任务数据无法读取',
+      code: 'TASK_CORRUPTED'
+    });
   }
 
   res.status(200).json({
     task_id: task.id,
-    logs: task.logs || [],
-    status: task.status,
-    progress: task.progress || 0,
-    processed_count: task.processedCount || 0,
-    total_count: task.totalCount || 0
+    logs: task.logs || []
   });
 }

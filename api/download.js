@@ -7,8 +7,23 @@ async function loadTaskFromFile(taskId) {
     const content = await fs.readFile(taskPath, 'utf-8');
     return JSON.parse(content);
   } catch (error) {
-    console.error('Failed to load task:', error);
+    if (error.code === 'ENOENT') {
+      console.log(`Task file not found for download request, task ID: ${taskId}`);
+      return null;
+    }
+    console.error('Failed to load task for download:', error);
     return null;
+  }
+}
+
+// 检查任务文件是否存在
+async function taskExists(taskId) {
+  try {
+    const taskPath = `/tmp/task_${taskId}.json`;
+    await fs.access(taskPath);
+    return true;
+  } catch (error) {
+    return false;
   }
 }
 
@@ -23,19 +38,42 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID and file type are required' });
   }
 
+  // 检查任务是否存在
+  const exists = await taskExists(task_id);
+  if (!exists) {
+    return res.status(404).json({ 
+      error: 'Task not found or expired',
+      message: '分析任务已过期或被清理，无法下载文件',
+      code: 'TASK_NOT_FOUND',
+      suggestion: '请重新运行分析以生成新的下载文件。'
+    });
+  }
+
   // 从文件系统获取任务信息
   const task = await loadTaskFromFile(task_id);
 
   if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
+    return res.status(404).json({ 
+      error: 'Task data corrupted',
+      message: '任务数据损坏，无法下载文件',
+      code: 'TASK_CORRUPTED'
+    });
   }
 
   if (task.status !== 'completed') {
-    return res.status(400).json({ error: 'Task not completed yet' });
+    return res.status(400).json({ 
+      error: 'Task not completed yet',
+      message: '分析尚未完成，请等待分析完成后再下载',
+      current_status: task.status
+    });
   }
 
   if (!task.results || !task.results.detailed_results) {
-    return res.status(400).json({ error: 'No analysis results available' });
+    return res.status(400).json({ 
+      error: 'No analysis results available',
+      message: '没有可用的分析结果',
+      code: 'NO_RESULTS'
+    });
   }
 
   // 根据类型过滤结果

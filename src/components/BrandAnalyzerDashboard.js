@@ -157,9 +157,10 @@ const BrandAnalyzerDashboard = () => {
         
         if (response.status === 404) {
           // 任务不存在，可能已经被清理，停止轮询
-          console.warn('Task not found, stopping polling');
+          const errorData = await response.json();
+          console.warn('Task not found, stopping polling:', errorData);
           setStatus('error');
-          setError('分析任务已过期或被清理，请重新上传文件');
+          setError(errorData.message || '分析任务已过期或被清理，请重新上传文件');
           return;
         }
         
@@ -292,10 +293,16 @@ test_creator_3,Tech Enthusiast,false,,25000`;
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
-        setError('Download failed');
+        const errorData = await response.json();
+        if (response.status === 404 && errorData.code === 'TASK_NOT_FOUND') {
+          setError('分析任务已过期，无法下载文件。请重新运行分析。');
+        } else {
+          setError(errorData.message || 'Download failed');
+        }
       }
     } catch (error) {
-      setError('Download error: ' + error.message);
+      console.error('Download error:', error);
+      setError('下载文件时发生网络错误，请稍后重试');
     }
   };
 
@@ -493,21 +500,33 @@ test_creator_3,Tech Enthusiast,false,,25000`;
               
               {/* 显示错误信息 */}
               {error && (
-                <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                <div className="mt-2 p-4 bg-red-50 border border-red-200 rounded-md">
                   <div className="flex">
-                    <AlertCircle className="h-5 w-5 text-red-400 mr-2 mt-0.5" />
-                    <div>
-                      <p className="text-sm text-red-800">{error}</p>
-                      <button
-                        onClick={resetAnalysis}
-                        className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-                      >
-                        重新开始分析
-                      </button>
+                    <AlertCircle className="h-5 w-5 text-red-400 mr-3 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm text-red-800 font-medium">分析出现问题</p>
+                      <p className="text-sm text-red-700 mt-1">{error}</p>
+                      <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                        <button
+                          onClick={resetAnalysis}
+                          className="text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 transition-colors"
+                        >
+                          重新开始分析
+                        </button>
+                        <button
+                          onClick={() => window.location.reload()}
+                          className="text-sm bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 transition-colors"
+                        >
+                          刷新页面
+                        </button>
+                      </div>
+                      <div className="mt-2 text-xs text-red-600">
+                        <strong>提示：</strong>这通常是因为服务器重启或任务文件被清理。重新上传文件即可解决问题。
+                      </div>
                     </div>
                   </div>
-              </div>
-            )}
+                </div>
+              )}
             </div>
 
             {/* Processing Logs */}

@@ -7,8 +7,23 @@ async function loadTaskFromFile(taskId) {
     const content = await fs.readFile(taskPath, 'utf-8');
     return JSON.parse(content);
   } catch (error) {
+    if (error.code === 'ENOENT') {
+      console.log(`Task file not found for task ID: ${taskId}. This may be due to server restart or file cleanup.`);
+      return null;
+    }
     console.error('Failed to load task:', error);
     return null;
+  }
+}
+
+// 检查任务文件是否存在
+async function taskExists(taskId) {
+  try {
+    const taskPath = `/tmp/task_${taskId}.json`;
+    await fs.access(taskPath);
+    return true;
+  } catch (error) {
+    return false;
   }
 }
 
@@ -23,11 +38,27 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Task ID is required' });
   }
 
+  // 首先检查任务是否存在
+  const exists = await taskExists(task_id);
+  if (!exists) {
+    return res.status(404).json({ 
+      error: 'Task not found or expired',
+      message: '分析任务已过期或被清理，请重新上传文件',
+      code: 'TASK_NOT_FOUND',
+      suggestion: '这可能是因为服务器重启或任务文件被自动清理。请重新上传文件开始新的分析。'
+    });
+  }
+
   // 从文件系统获取任务状态
   const task = await loadTaskFromFile(task_id);
 
   if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
+    return res.status(404).json({ 
+      error: 'Task data corrupted',
+      message: '任务数据损坏，请重新上传文件',
+      code: 'TASK_CORRUPTED',
+      suggestion: '任务文件存在但无法读取。请重新开始分析。'
+    });
   }
 
   const response = {
