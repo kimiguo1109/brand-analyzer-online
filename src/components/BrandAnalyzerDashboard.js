@@ -146,6 +146,7 @@ const BrandAnalyzerDashboard = () => {
   const handleRealUpload = async () => {
     setUploading(true);
     setError(null);
+    setStatus('processing');
 
     const formData = new FormData();
     formData.append('file', file);
@@ -158,54 +159,76 @@ const BrandAnalyzerDashboard = () => {
 
       if (response.ok) {
         const data = await response.json();
-        setTaskId(data.task_id);
         
         if (data.status === 'completed' && data.results) {
           // 分析已完成，直接显示结果
+          setTaskId(data.analysis_id);
           setStatus('completed');
           
-          // 映射后端数据结构到前端期望的格式
-          const backendResults = data.results;
+          // 处理新的API响应格式
+          const analysisResults = data.results;
+          
+          // 计算统计数据
+          const brandRelated = analysisResults.brand_related_data || [];
+          const nonBrand = analysisResults.non_brand_data || [];
+          const totalProcessed = data.total_processed || 0;
+          
+          // 分类统计
+          const officialCount = brandRelated.filter(r => r.account_type === 'official account').length;
+          const matrixCount = brandRelated.filter(r => r.account_type === 'matrix account').length;
+          const ugcCount = brandRelated.filter(r => r.account_type === 'ugc creator').length;
+          const nonBrandedCount = nonBrand.length;
+          
           const mappedResults = {
-            total_processed: backendResults.total_processed || 0,
-            brand_related_count: backendResults.brand_related_count || 0,
-            non_brand_count: backendResults.non_brand_count || 0,
+            total_processed: totalProcessed,
+            brand_related_count: brandRelated.length,
+            non_brand_count: nonBrand.length,
+            
             // 各类型在总创作者中的数量
-            official_account_count: backendResults.official_account_count || 0,
-            matrix_account_count: backendResults.matrix_account_count || 0,
-            ugc_creator_count: backendResults.ugc_creator_count || 0,
-            non_branded_creator_count: backendResults.non_branded_creator_count || 0,
+            official_account_count: officialCount,
+            matrix_account_count: matrixCount,
+            ugc_creator_count: ugcCount,
+            non_branded_creator_count: nonBrandedCount,
+            
             // 各类型在总创作者中的百分比
-            official_account_percentage: backendResults.official_account_percentage || 0,
-            matrix_account_percentage: backendResults.matrix_account_percentage || 0,
-            ugc_creator_percentage: backendResults.ugc_creator_percentage || 0,
-            non_branded_creator_percentage: backendResults.non_branded_creator_percentage || 0,
+            official_account_percentage: totalProcessed > 0 ? Math.round((officialCount / totalProcessed) * 100) : 0,
+            matrix_account_percentage: totalProcessed > 0 ? Math.round((matrixCount / totalProcessed) * 100) : 0,
+            ugc_creator_percentage: totalProcessed > 0 ? Math.round((ugcCount / totalProcessed) * 100) : 0,
+            non_branded_creator_percentage: totalProcessed > 0 ? Math.round((nonBrandedCount / totalProcessed) * 100) : 0,
+            
             // Brand Related Breakdown - 在品牌相关账号中的数量和百分比
-            brand_in_related: backendResults.brand_in_related || 0,
-            matrix_in_related: backendResults.matrix_in_related || 0,
-            ugc_in_related: backendResults.ugc_in_related || 0,
-            brand_in_related_percentage: backendResults.brand_in_related_percentage || 0,
-            matrix_in_related_percentage: backendResults.matrix_in_related_percentage || 0,
-            ugc_in_related_percentage: backendResults.ugc_in_related_percentage || 0,
-            brand_file: backendResults.brand_file,
-            non_brand_file: backendResults.non_brand_file
+            brand_in_related: officialCount,
+            matrix_in_related: matrixCount,
+            ugc_in_related: ugcCount,
+            brand_in_related_percentage: brandRelated.length > 0 ? Math.round((officialCount / brandRelated.length) * 100) : 0,
+            matrix_in_related_percentage: brandRelated.length > 0 ? Math.round((matrixCount / brandRelated.length) * 100) : 0,
+            ugc_in_related_percentage: brandRelated.length > 0 ? Math.round((ugcCount / brandRelated.length) * 100) : 0,
+            
+            // 数据文件（用于下载）
+            brand_file: 'brand_related_creators.csv',
+            non_brand_file: 'non_brand_creators.csv'
           };
+          
           setResults(mappedResults);
-          setDetailedResults(backendResults.detailed_results || []); // 存储详细结果
-          setLogs(['文件上传成功', '分析完成', `处理了 ${mappedResults.total_processed} 个创作者`]);
+          setDetailedResults(analysisResults.all_data || []); // 存储详细结果用于下载
+          setLogs(data.analysis_logs || ['文件上传成功', '分析完成']);
+          
         } else if (data.status === 'error') {
           setStatus('error');
           setError(data.error || '分析过程中发生错误');
         } else {
-          // 如果分析还在进行中，设置为处理状态
-          setStatus('processing');
+          // 这种情况在新的同步模式下不应该发生
+          setStatus('error');
+          setError('意外的响应状态: ' + data.status);
         }
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Upload failed');
+        setStatus('error');
       }
     } catch (error) {
       setError('Network error: ' + error.message);
+      setStatus('error');
     } finally {
       setUploading(false);
     }
@@ -308,122 +331,9 @@ const BrandAnalyzerDashboard = () => {
     }
   };
 
-  // 轮询状态（仅在真实分析模式下）
-  useEffect(() => {
-    if (useMockData || !taskId || status === 'completed' || status === 'error') return;
+  // 轮询已移除，现在使用同步分析
 
-    const pollStatus = async () => {
-      try {
-        const response = await fetch(`/api/status?task_id=${taskId}`);
-        
-        if (response.status === 404) {
-          // 任务不存在，可能已经被清理，停止轮询
-          const errorData = await response.json();
-          console.warn('Task not found, stopping polling:', errorData);
-          setStatus('error');
-          setError(errorData.message || '分析任务已过期或被清理，请重新上传文件');
-          return;
-        }
-        
-        const data = await response.json();
-        
-        setStatus(data.status);
-        
-        if (data.status === 'completed') {
-          // 映射后端数据结构到前端期望的格式
-          const backendResults = data.results;
-          if (backendResults) {
-            const total = backendResults.total_processed || 0;
-            const brandRelated = backendResults.brand_related_count || 0;
-            
-            // 计算各类型百分比
-            const officialPct = total > 0 ? Math.round((backendResults.official_brand_count / total) * 100) : 0;
-            const matrixPct = total > 0 ? Math.round((backendResults.matrix_account_count / total) * 100) : 0;
-            const ugcPct = total > 0 ? Math.round((backendResults.ugc_creator_count / total) * 100) : 0;
-            const nonBrandedPct = total > 0 ? Math.round((backendResults.non_branded_creator_count / total) * 100) : 0;
-            
-            // 在品牌相关账号中的比例
-            const brandInRelatedPct = brandRelated > 0 ? Math.round((backendResults.official_brand_count / brandRelated) * 100) : 0;
-            const matrixInRelatedPct = brandRelated > 0 ? Math.round((backendResults.matrix_account_count / brandRelated) * 100) : 0;
-            const ugcInRelatedPct = brandRelated > 0 ? Math.round((backendResults.ugc_creator_count / brandRelated) * 100) : 0;
-
-            const mappedResults = {
-              total_processed: total,
-              brand_related_count: brandRelated,
-              non_brand_count: backendResults.non_brand_count || 0,
-              // 各类型在总创作者中的数量
-              official_account_count: backendResults.official_brand_count || 0,
-              matrix_account_count: backendResults.matrix_account_count || 0,
-              ugc_creator_count: backendResults.ugc_creator_count || 0,
-              non_branded_creator_count: backendResults.non_branded_creator_count || 0,
-              // 各类型在总创作者中的百分比
-              official_account_percentage: officialPct,
-              matrix_account_percentage: matrixPct,
-              ugc_creator_percentage: ugcPct,
-              non_branded_creator_percentage: nonBrandedPct,
-              // Brand Related Breakdown - 在品牌相关账号中的数量和百分比
-              brand_in_related: backendResults.official_brand_count || 0,
-              matrix_in_related: backendResults.matrix_account_count || 0,
-              ugc_in_related: backendResults.ugc_creator_count || 0,
-              brand_in_related_percentage: brandInRelatedPct,
-              matrix_in_related_percentage: matrixInRelatedPct,
-              ugc_in_related_percentage: ugcInRelatedPct,
-              // 品牌分布信息
-              brand_distribution: backendResults.brand_distribution || {},
-              unique_brands_count: backendResults.unique_brands_count || 0,
-              brand_file: 'brand_related_creators.csv',
-              non_brand_file: 'non_brand_creators.csv'
-            };
-            setResults(mappedResults);
-            setDetailedResults(backendResults); // 存储完整的后端结果
-          }
-        } else if (data.status === 'error') {
-          setError(data.progress || data.error || '分析过程中发生错误');
-        }
-      } catch (error) {
-        console.error('Status polling error:', error);
-        // 如果轮询出错多次，停止轮询
-        setError('无法获取分析状态，请刷新页面重试');
-      }
-    };
-
-    const interval = setInterval(pollStatus, 2000);
-    return () => clearInterval(interval);
-  }, [taskId, status, useMockData]);
-
-  // 获取日志（仅在真实分析模式下）
-  useEffect(() => {
-    if (useMockData || !taskId || status === 'completed' || status === 'error') return;
-
-    const fetchLogs = async () => {
-      try {
-        const response = await fetch(`/api/logs?task_id=${taskId}`);
-        
-        if (response.status === 404) {
-          // 任务不存在，停止获取日志
-          console.warn('Task not found for logs, stopping log fetching');
-          return;
-        }
-        
-        const data = await response.json();
-        if (data.logs) {
-          // 处理不同格式的日志
-          const processedLogs = data.logs.map(log => {
-            if (typeof log === 'string') return log;
-            if (log && typeof log === 'object' && log.message) return log.message;
-            return log ? JSON.stringify(log) : '';
-          }).filter(log => log.trim());
-          
-          setLogs(processedLogs);
-        }
-      } catch (error) {
-        console.error('Fetch logs error:', error);
-      }
-    };
-
-    const interval = setInterval(fetchLogs, 3000);
-    return () => clearInterval(interval);
-  }, [taskId, useMockData, status]);
+  // 日志轮询已移除，现在日志直接在上传时返回
 
   // 自动滚动日志到底部（分析进行中时滚动）
   useEffect(() => {
